@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Simple Mesh Video Call</title>
+  <title>Simple Video Call</title>
   <style>
     body { 
       font-family: sans-serif; 
@@ -16,22 +16,28 @@
       align-items: center; 
       margin-top: 50px;
     }
-    video {
-      width: 300px; 
-      height: 300px;
-      margin: 5px; 
-      background: black;
-      border-radius: 8px;
-      object-fit: cover;
-    }
     #videoGrid {
       display: grid;
       grid-template-columns: repeat(auto-fill, 300px);
       gap: 10px;
       padding: 20px;
+      width: 100%;
+      max-width: 1200px;
+      margin: 0 auto;
     }
     .videoContainer {
       position: relative;
+      width: 300px;
+      height: 300px;
+      background: #000;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      background: #000;
     }
     .peerId {
       position: absolute;
@@ -48,7 +54,7 @@
       top: 20px;
       right: 20px;
       background: white;
-      padding: 10px;
+      padding: 10px 20px;
       border-radius: 4px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
@@ -56,87 +62,78 @@
       position: fixed;
       bottom: 20px;
       left: 20px;
+      max-width: 400px;
+      max-height: 200px;
+      overflow: auto;
       background: rgba(0,0,0,0.8);
       color: white;
       padding: 10px;
       border-radius: 4px;
       font-family: monospace;
       font-size: 12px;
-      max-width: 400px;
-      max-height: 200px;
-      overflow: auto;
       z-index: 1000;
     }
-    #loginForm input {
-      margin: 10px 0;
-      padding: 8px;
-      border-radius: 4px;
-      border: 1px solid #ccc;
-    }
-    #loginForm button {
-      margin-top: 10px;
+    button {
       padding: 10px 20px;
+      font-size: 16px;
       background: #4CAF50;
       color: white;
       border: none;
       border-radius: 4px;
       cursor: pointer;
+      margin: 10px;
     }
-    #loginForm button:hover {
+    button:hover {
       background: #45a049;
+    }
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
     }
   </style>
 </head>
 <body>
   <div id="loginForm">
-    <h1>Enter Password to Join Video Call</h1>
-    <input type="password" id="passwordInput" placeholder="osopanda" />
-    <button id="joinBtn">Join Conference</button>
-    <p id="errorMessage" style="color: red;"></p>
+    <button id="joinButton">Join Call</button>
   </div>
 
-  <div id="videoGrid" style="display:none">
-    <div id="status">Connecting...</div>
-  </div>
-
+  <div id="videoGrid"></div>
+  <div id="status">Ready</div>
   <div id="debugInfo"></div>
 
   <script>
     const SIGNALING_SERVER = 'https://193.124.115.137:3000';
     const POLL_INTERVAL = 1000;
     
-    let myUuid = null;
-    let localStream = null;
-    const peers = new Map();
-    let isPolling = false;
-
-    const loginForm = document.getElementById('loginForm');
+    // DOM elements
     const videoGrid = document.getElementById('videoGrid');
-    const passwordInput = document.getElementById('passwordInput');
-    const joinBtn = document.getElementById('joinBtn');
-    const errorMessage = document.getElementById('errorMessage');
+    const joinButton = document.getElementById('joinButton');
     const statusDiv = document.getElementById('status');
     const debugInfo = document.getElementById('debugInfo');
+    
+    // State
+    let myUuid = null;
+    let localStream = null;
+    let isPolling = false;
+    const peers = new Map();
 
     function log(message, data = null) {
-        console.log(message, data);
-        const time = new Date().toLocaleTimeString();
-        const text = data ? `${time} - ${message}: ${JSON.stringify(data)}` : `${time} - ${message}`;
-        debugInfo.innerHTML = text + '<br>' + debugInfo.innerHTML;
+      const time = new Date().toLocaleTimeString();
+      const text = data ? `${time} - ${message}: ${JSON.stringify(data)}` : `${time} - ${message}`;
+      console.log(message, data);
+      debugInfo.innerHTML = text + '<br>' + debugInfo.innerHTML;
     }
 
-    // Enhanced ICE servers configuration
     const iceServers = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' }
-      ]
+        { urls: 'stun:stun2.l.google.com:19302' }
+      ],
+      iceCandidatePoolSize: 10
     };
 
-    // Signaling server API calls
+    // API calls
     async function registerPeer() {
       try {
         const response = await fetch(`${SIGNALING_SERVER}/peers`, {
@@ -145,7 +142,7 @@
           body: JSON.stringify({ uuid: myUuid })
         });
         const data = await response.json();
-        log('Registered peer', data);
+        log('Registered with server', data);
         return data.peers;
       } catch (error) {
         log('Registration error', error.message);
@@ -158,7 +155,7 @@
         const response = await fetch(`${SIGNALING_SERVER}/peers/${myUuid}/messages`);
         const data = await response.json();
         if (data.messages.length > 0) {
-          log('Received messages', data.messages.length);
+          log('Received messages', { count: data.messages.length });
         }
         return data.messages;
       } catch (error) {
@@ -185,65 +182,131 @@
       }
     }
 
+    // WebRTC
     function createPeerConnection(targetUuid) {
-      let peerInfo = peers.get(targetUuid);
-      if (peerInfo?.pc) return peerInfo.pc;
+      if (peers.has(targetUuid)) {
+        return peers.get(targetUuid).pc;
+      }
 
       log('Creating peer connection', targetUuid);
       const pc = new RTCPeerConnection(iceServers);
       
-      peerInfo = {
+      const peerInfo = {
         pc,
         iceCandidates: [],
         hasRemoteDescription: false
       };
       peers.set(targetUuid, peerInfo);
 
+      // Connection state monitoring
+      pc.onconnectionstatechange = () => {
+        log('Connection state', { targetUuid, state: pc.connectionState });
+        updateStatus(`Peer ${targetUuid}: ${pc.connectionState}`);
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        log('ICE state', { targetUuid, state: pc.iceConnectionState });
+      };
+
+      pc.onicegatheringstatechange = () => {
+        log('ICE gathering state', { targetUuid, state: pc.iceGatheringState });
+      };
+
+      // Handle ICE candidates
       pc.onicecandidate = (event) => {
         if (event.candidate) {
-          log('ICE candidate', { targetUuid, candidate: event.candidate.candidate });
+          log('Generated ICE candidate', { targetUuid, type: event.candidate.type });
           sendToPeer(targetUuid, 'ice-candidate', event.candidate);
         }
       };
 
-      pc.oniceconnectionstatechange = () => {
-        log('ICE state change', { targetUuid, state: pc.iceConnectionState });
-        if (pc.iceConnectionState === 'connected') {
-          peerInfo.iceCandidates = [];
-        }
-      };
-
-      pc.onconnectionstatechange = () => {
-        log('Connection state change', { targetUuid, state: pc.connectionState });
-      };
-
-      pc.onnegotiationneeded = () => {
-        log('Negotiation needed', targetUuid);
-      };
-
+      // Handle incoming tracks
       pc.ontrack = (event) => {
-        log('Received tracks', {
+        log('Received track', {
           targetUuid,
-          tracks: event.streams[0].getTracks().map(t => ({
-            kind: t.kind,
-            enabled: t.enabled,
-            readyState: t.readyState
-          }))
+          kind: event.track.kind,
+          readyState: event.track.readyState
         });
         displayVideo(targetUuid, event.streams[0]);
       };
 
-      // Add our video/audio tracks
-      localStream.getTracks().forEach(track => {
-        log('Adding local track', {
-          targetUuid,
-          kind: track.kind,
-          enabled: track.enabled
+      // Add local tracks if available
+      if (localStream) {
+        localStream.getTracks().forEach(track => {
+          pc.addTrack(track, localStream);
+          log('Added local track', {
+            targetUuid,
+            kind: track.kind,
+            enabled: track.enabled
+          });
         });
-        pc.addTrack(track, localStream);
-      });
+      }
 
       return pc;
+    }
+
+    async function handleMessage(message) {
+      const { type, data, from } = message;
+      log('Handling message', { type, from });
+
+      try {
+        switch (type) {
+          case 'offer': {
+            const pc = createPeerConnection(from);
+            log('Setting remote description (offer)', from);
+            await pc.setRemoteDescription(new RTCSessionDescription(data));
+            peers.get(from).hasRemoteDescription = true;
+            
+            // Process queued candidates
+            const peerInfo = peers.get(from);
+            while (peerInfo.iceCandidates.length) {
+              const candidate = peerInfo.iceCandidates.shift();
+              await pc.addIceCandidate(candidate);
+              log('Added queued candidate', from);
+            }
+            
+            const answer = await pc.createAnswer();
+            log('Created answer', from);
+            await pc.setLocalDescription(answer);
+            await sendToPeer(from, 'answer', answer);
+            break;
+          }
+
+          case 'answer': {
+            const peerInfo = peers.get(from);
+            if (!peerInfo?.pc) return;
+            
+            log('Setting remote description (answer)', from);
+            await peerInfo.pc.setRemoteDescription(new RTCSessionDescription(data));
+            peerInfo.hasRemoteDescription = true;
+
+            // Process queued candidates
+            while (peerInfo.iceCandidates.length) {
+              const candidate = peerInfo.iceCandidates.shift();
+              await peerInfo.pc.addIceCandidate(candidate);
+              log('Added queued candidate', from);
+            }
+            break;
+          }
+
+          case 'ice-candidate': {
+            const peerInfo = peers.get(from);
+            if (!peerInfo?.pc) return;
+
+            const candidate = new RTCIceCandidate(data);
+            if (!peerInfo.hasRemoteDescription) {
+              log('Queueing ICE candidate', from);
+              peerInfo.iceCandidates.push(candidate);
+            } else {
+              log('Adding ICE candidate', from);
+              await peerInfo.pc.addIceCandidate(candidate);
+            }
+            break;
+          }
+        }
+      } catch (error) {
+        log('Error handling message', { type, from, error: error.message });
+      }
     }
 
     function displayVideo(uuid, stream) {
@@ -259,15 +322,8 @@
         video.playsInline = true;
         
         video.onloadedmetadata = () => {
-          log('Video loaded', uuid);
-        };
-        
-        video.onplay = () => {
-          log('Video playing', uuid);
-        };
-        
-        video.onerror = (e) => {
-          log('Video error', { uuid, error: e.target.error });
+          log('Video metadata loaded', uuid);
+          video.play().catch(e => log('Video play error', e.message));
         };
         
         if (uuid === myUuid) {
@@ -285,72 +341,11 @@
       
       const video = container.querySelector('video');
       if (video.srcObject !== stream) {
-        log('Setting stream', {
+        log('Setting video stream', {
           uuid,
-          tracks: stream.getTracks().map(t => ({
-            kind: t.kind,
-            enabled: t.enabled,
-            readyState: t.readyState
-          }))
+          tracks: stream.getTracks().length
         });
         video.srcObject = stream;
-        video.play().catch(e => log('Play error', { uuid, error: e.message }));
-      }
-    }
-
-    async function handleMessage(message) {
-      const { type, data, from } = message;
-      const peerInfo = peers.get(from) || {
-        pc: null,
-        iceCandidates: [],
-        hasRemoteDescription: false
-      };
-
-      try {
-        switch (type) {
-          case 'offer':
-            log('Processing offer', from);
-            const pc = createPeerConnection(from);
-            await pc.setRemoteDescription(new RTCSessionDescription(data));
-            peerInfo.hasRemoteDescription = true;
-            
-            while (peerInfo.iceCandidates.length) {
-              const candidate = peerInfo.iceCandidates.shift();
-              await pc.addIceCandidate(candidate);
-            }
-            
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            await sendToPeer(from, 'answer', answer);
-            break;
-
-          case 'answer':
-            log('Processing answer', from);
-            if (peerInfo.pc && peerInfo.pc.signalingState !== 'stable') {
-              await peerInfo.pc.setRemoteDescription(new RTCSessionDescription(data));
-              peerInfo.hasRemoteDescription = true;
-              
-              while (peerInfo.iceCandidates.length) {
-                const candidate = peerInfo.iceCandidates.shift();
-                await peerInfo.pc.addIceCandidate(candidate);
-              }
-            }
-            break;
-
-          case 'ice-candidate':
-            if (!peerInfo.pc) return;
-            
-            if (!peerInfo.hasRemoteDescription) {
-              log('Queueing ICE candidate', from);
-              peerInfo.iceCandidates.push(new RTCIceCandidate(data));
-            } else {
-              log('Adding ICE candidate', from);
-              await peerInfo.pc.addIceCandidate(new RTCIceCandidate(data));
-            }
-            break;
-        }
-      } catch (error) {
-        log('Message handling error', { type, from, error: error.message });
       }
     }
 
@@ -358,52 +353,52 @@
       if (!isPolling) return;
 
       try {
+        // Get active peers
         const activePeers = await registerPeer();
         
+        // Connect to new peers
         for (const peerUuid of activePeers) {
-          if (!peers.has(peerUuid) || !peers.get(peerUuid).pc) {
+          if (!peers.has(peerUuid)) {
             const pc = createPeerConnection(peerUuid);
-            try {
-              log('Creating offer', peerUuid);
-              const offer = await pc.createOffer();
-              await pc.setLocalDescription(offer);
-              await sendToPeer(peerUuid, 'offer', offer);
-            } catch (error) {
-              log('Offer creation error', { peerUuid, error: error.message });
-            }
+            log('Creating offer', peerUuid);
+            
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            await sendToPeer(peerUuid, 'offer', offer);
           }
         }
 
+        // Check for messages
         const messages = await pollMessages();
         for (const message of messages) {
           await handleMessage(message);
         }
 
-        statusDiv.textContent = `Connected (${peers.size + 1} peers)`;
       } catch (error) {
         log('Polling error', error.message);
-        statusDiv.textContent = 'Connection error - retrying...';
+        updateStatus('Connection error - retrying...');
       }
 
       setTimeout(pollLoop, POLL_INTERVAL);
     }
 
-    joinBtn.onclick = async () => {
-      const password = passwordInput.value.trim();
-      if (password !== 'osopanda') {
-        errorMessage.textContent = 'Invalid password!';
-        return;
-      }
+    function updateStatus(text) {
+      statusDiv.textContent = text;
+    }
 
+    joinButton.onclick = async () => {
       try {
+        joinButton.disabled = true;
         myUuid = 'user-' + Math.random().toString(36).substr(2, 9);
+        
+        updateStatus('Accessing camera...');
         log('Starting session', myUuid);
         
-        statusDiv.textContent = 'Accessing camera...';
         localStream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: true
         });
+        
         log('Got local stream', {
           tracks: localStream.getTracks().map(t => ({
             kind: t.kind,
@@ -411,20 +406,22 @@
           }))
         });
 
-        loginForm.style.display = 'none';
-        videoGrid.style.display = 'grid';
-        
         displayVideo(myUuid, localStream);
+        joinButton.style.display = 'none';
         
         isPolling = true;
         pollLoop();
+        
+        updateStatus('Connected to call');
 
       } catch (error) {
         log('Setup error', error.message);
-        errorMessage.textContent = 'Could not access camera/microphone: ' + error.message;
+        updateStatus('Error: ' + error.message);
+        joinButton.disabled = false;
       }
     };
 
+    // Cleanup
     window.addEventListener('beforeunload', async () => {
       isPolling = false;
       
@@ -439,7 +436,10 @@
         }
       }
       
-      peers.forEach(({ pc }) => pc?.close());
+      peers.forEach(peer => {
+        if (peer.pc) peer.pc.close();
+      });
+
       if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
       }
