@@ -6,6 +6,7 @@
     <title>Global Video Conference</title>
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <style>
+        /* Previous styles remain the same */
         body {
             font-family: Arial, sans-serif;
             display: flex;
@@ -45,12 +46,6 @@
             border-radius: 4px;
             font-size: 12px;
         }
-        #controls {
-            margin: 20px;
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
         button {
             padding: 10px 20px;
             font-size: 16px;
@@ -59,32 +54,17 @@
             border: none;
             border-radius: 5px;
             cursor: pointer;
+            margin: 5px;
         }
         button:disabled {
             background-color: #cccccc;
-            cursor: not-allowed;
         }
-        #status {
-            margin: 20px;
-            padding: 10px 20px;
-            border-radius: 5px;
-            background-color: white;
-            text-align: center;
-        }
-        #peerStats {
+        #status, #peerStats {
             margin: 10px;
             padding: 15px;
             background-color: white;
             border-radius: 5px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .waiting {
-            animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
+            text-align: center;
         }
     </style>
 </head>
@@ -105,24 +85,93 @@
         const leaveButton = document.getElementById('leaveButton');
         const peerStats = document.getElementById('peerStats');
         
+        let ws = null;
         let peer = null;
         let myStream = null;
         let connections = new Map();
-        const ROOM_ID = 'global-room';
         let myUUID = generateUUID();
-        let connectedPeers = new Set();
-
+        
         function generateUUID() {
             return 'pid-' + Math.random().toString(36).substr(2, 9);
         }
 
-        function updatePeerCount() {
-            const count = connectedPeers.size + 1; // +1 for self
-            peerStats.textContent = `Connected Peers: ${count}\nPeer IDs:\n`;
-            peerStats.innerHTML = `Connected Peers: ${count}<br>Peer IDs:<br>- ${myUUID} (You)`;
-            connectedPeers.forEach(peerId => {
-                peerStats.innerHTML += `<br>- ${peerId}`;
+        function connectToSignalingServer() {
+            ws = new WebSocket('ws://193.124.115.137:3000');
+            
+            ws.onopen = () => {
+                console.log('Connected to signaling server');
+                if (peer) {
+                    // Register with the signaling server
+                    ws.send(JSON.stringify({
+                        type: 'register',
+                        peerId: peer.id,
+                        uuid: myUUID
+                    }));
+                }
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                switch(data.type) {
+                    case 'peers-list':
+                        handlePeersList(data.peers);
+                        break;
+                    case 'peer-joined':
+                        handlePeerJoined(data.peerId, data.uuid);
+                        break;
+                    case 'peer-left':
+                        handlePeerLeft(data.peerId);
+                        break;
+                    case 'signal':
+                        handleSignal(data.peerId, data.signal);
+                        break;
+                }
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                statusElement.textContent = 'Connection error. Please try again.';
+            };
+            
+            ws.onclose = () => {
+                console.log('Disconnected from signaling server');
+                setTimeout(connectToSignalingServer, 5000); // Reconnect after 5 seconds
+            };
+        }
+
+        function handlePeersList(peers) {
+            peers.forEach(peer => {
+                if (peer.peerId !== peer?.id) {
+                    connectToPeer(peer.peerId, peer.uuid);
+                }
             });
+            updatePeerCount();
+        }
+
+        function handlePeerJoined(peerId, uuid) {
+            if (peerId !== peer?.id) {
+                connectToPeer(peerId, uuid);
+                updatePeerCount();
+            }
+        }
+
+        function handlePeerLeft(peerId) {
+            removeVideoStream(peerId);
+            const conn = connections.get(peerId);
+            if (conn) {
+                conn.close();
+                connections.delete(peerId);
+            }
+            updatePeerCount();
+        }
+
+        function handleSignal(peerId, signal) {
+            // Handle incoming WebRTC signaling
+            if (myStream) {
+                const call = peer.call(peerId, myStream);
+                handleCall(call, peerId);
+            }
         }
 
         function initPeer() {
@@ -130,90 +179,62 @@
             
             peer.on('open', id => {
                 console.log('My peer ID:', id);
+                statusElement.textContent = 'Connected to server';
                 joinButton.disabled = false;
-                checkAndConnectToRoom();
+                
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: 'register',
+                        peerId: id,
+                        uuid: myUUID
+                    }));
+                }
             });
 
-            peer.on('connection', handleDataConnection);
-            peer.on('call', handleIncomingCall);
+            peer.on('call', call => {
+                if (myStream) {
+                    call.answer(myStream);
+                    handleCall(call, call.peer);
+                }
+            });
 
             peer.on('error', error => {
                 console.error('Peer error:', error);
-                if (error.type !== 'peer-unavailable') {
-                    statusElement.textContent = 'Connection error. Please try again.';
-                }
+                statusElement.textContent = 'Connection error. Please try again.';
             });
         }
 
-        function handleDataConnection(conn) {
-            conn.on('data', data => {
-                if (data.type === 'peer-info') {
-                    connectedPeers.add(data.uuid);
-                    updatePeerCount();
-                    // Share our UUID with the new peer
-                    conn.send({
-                        type: 'peer-info',
-                        uuid: myUUID
-                    });
-                }
-            });
-
-            conn.on('close', () => {
-                console.log('Data connection closed');
-            });
-        }
-
-        function handleIncomingCall(call) {
-            console.log('Receiving call');
-            if (myStream) {
-                call.answer(myStream);
-                handleCall(call);
+        function connectToPeer(peerId, uuid) {
+            if (myStream && !connections.has(peerId)) {
+                console.log('Connecting to peer:', peerId);
+                const call = peer.call(peerId, myStream);
+                handleCall(call, peerId, uuid);
             }
         }
 
-        function checkAndConnectToRoom() {
-            const conn = peer.connect(ROOM_ID);
-            
-            conn.on('open', () => {
-                console.log('Connected to room');
-            });
-
-            conn.on('error', () => {
-                becomeHost();
-            });
-        }
-
-        function becomeHost() {
-            console.log('Becoming host');
-            const hostPeer = new Peer(ROOM_ID);
-            
-            hostPeer.on('open', () => {
-                console.log('Host ready');
-                peer = hostPeer;
-                peer.on('connection', handleDataConnection);
-                peer.on('call', handleIncomingCall);
-                updatePeerCount();
-            });
-        }
-
-        function handleCall(call) {
+        function handleCall(call, peerId, uuid) {
             call.on('stream', remoteStream => {
-                console.log('Received stream');
-                const conn = peer.connect(call.peer);
-                
-                conn.on('open', () => {
-                    conn.send({
-                        type: 'peer-info',
-                        uuid: myUUID
-                    });
-                });
-                
-                addVideoStream(remoteStream, call.peer);
-                statusElement.classList.remove('waiting');
+                console.log('Received stream from:', peerId);
+                addVideoStream(remoteStream, peerId, uuid);
                 statusElement.textContent = 'Connected to meeting';
             });
 
-            connections.set(call.peer, call);
+            call.on('close', () => {
+                removeVideoStream(peerId);
+                connections.delete(peerId);
+                updatePeerCount();
+            });
+
+            connections.set(peerId, call);
+        }
+
+        function updatePeerCount() {
+            const count = connections.size + 1; // +1 for self
+            let peerList = `Connected Peers: ${count}<br>- ${myUUID} (You)`;
+            connections.forEach((_, peerId) => {
+                peerList += `<br>- ${peerId}`;
+            });
+            peerStats.innerHTML = peerList;
         }
 
         joinButton.addEventListener('click', async () => {
@@ -226,15 +247,16 @@
                     audio: true 
                 });
                 
-                addVideoStream(myStream, 'local');
+                addVideoStream(myStream, 'local', myUUID);
                 joinButton.style.display = 'none';
                 leaveButton.style.display = 'inline-block';
                 
-                statusElement.classList.add('waiting');
                 statusElement.textContent = 'Connecting to meeting...';
                 updatePeerCount();
                 
-                checkAndConnectToRoom();
+                // Initialize connections
+                initPeer();
+                connectToSignalingServer();
                 
             } catch (error) {
                 console.error('Media error:', error);
@@ -243,18 +265,9 @@
             }
         });
 
-        leaveButton.addEventListener('click', () => {
-            cleanup();
-            joinButton.style.display = 'inline-block';
-            joinButton.disabled = false;
-            leaveButton.style.display = 'none';
-            statusElement.textContent = 'Left meeting';
-            statusElement.classList.remove('waiting');
-            connectedPeers.clear();
-            updatePeerCount();
-        });
+        leaveButton.addEventListener('click', cleanup);
 
-        function addVideoStream(stream, peerId) {
+        function addVideoStream(stream, peerId, uuid) {
             removeVideoStream(peerId);
             
             const container = document.createElement('div');
@@ -266,15 +279,16 @@
             video.setAttribute('playsinline', true);
             video.setAttribute('autoplay', true);
             video.setAttribute('muted', peerId === 'local');
-            video.play().catch(console.error);
             
             const peerLabel = document.createElement('div');
             peerLabel.className = 'peerId';
-            peerLabel.textContent = peerId === 'local' ? `${myUUID} (You)` : Array.from(connectedPeers)[connectedPeers.size - 1];
+            peerLabel.textContent = peerId === 'local' ? `${uuid} (You)` : uuid || peerId;
             
             container.appendChild(video);
             container.appendChild(peerLabel);
             videoGrid.appendChild(container);
+            
+            video.play().catch(console.error);
         }
 
         function removeVideoStream(peerId) {
@@ -294,23 +308,29 @@
                 myStream = null;
             }
 
-            connections.forEach((conn) => {
+            connections.forEach(conn => {
                 if (conn.close) conn.close();
             });
             connections.clear();
 
-            videoGrid.innerHTML = '';
+            if (ws) {
+                ws.close();
+            }
 
             if (peer) {
                 peer.destroy();
             }
-            
-            myUUID = generateUUID(); // Generate new UUID for next session
-            initPeer();
-        }
 
-        // Initialize on page load
-        initPeer();
+            videoGrid.innerHTML = '';
+            joinButton.style.display = 'inline-block';
+            joinButton.disabled = false;
+            leaveButton.style.display = 'none';
+            statusElement.textContent = 'Left meeting';
+            
+            // Reset for next session
+            myUUID = generateUUID();
+            updatePeerCount();
+        }
 
         // Cleanup on page unload
         window.addEventListener('beforeunload', cleanup);
