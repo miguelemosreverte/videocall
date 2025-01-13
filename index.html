@@ -52,6 +52,20 @@
       border-radius: 4px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
+    #debugInfo {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      background: rgba(0,0,0,0.8);
+      color: white;
+      padding: 10px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 12px;
+      max-width: 400px;
+      max-height: 200px;
+      overflow: auto;
+    }
   </style>
 </head>
 <body>
@@ -66,13 +80,15 @@
     <div id="status">Connecting...</div>
   </div>
 
+  <div id="debugInfo"></div>
+
   <script>
     const SIGNALING_SERVER = 'https://193.124.115.137:3000';
-    const POLL_INTERVAL = 1000; // Poll every second
+    const POLL_INTERVAL = 1000;
     
     let myUuid = null;
     let localStream = null;
-    const peers = new Map(); // peerId => RTCPeerConnection
+    const peers = new Map();
     let isPolling = false;
 
     const loginForm = document.getElementById('loginForm');
@@ -81,73 +97,127 @@
     const joinBtn = document.getElementById('joinBtn');
     const errorMessage = document.getElementById('errorMessage');
     const statusDiv = document.getElementById('status');
+    const debugInfo = document.getElementById('debugInfo');
+
+    function log(message, data = null) {
+        console.log(message, data);
+        const time = new Date().toLocaleTimeString();
+        const text = data ? `${time} - ${message}: ${JSON.stringify(data)}` : `${time} - ${message}`;
+        debugInfo.innerHTML += text + '<br>';
+        debugInfo.scrollTop = debugInfo.scrollHeight;
+    }
 
     const iceServers = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' }
       ]
     };
 
-    // Signaling server API calls
     async function registerPeer() {
-      const response = await fetch(`${SIGNALING_SERVER}/peers`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ uuid: myUuid })
-      });
-      const data = await response.json();
-      return data.peers;
+      try {
+        const response = await fetch(`${SIGNALING_SERVER}/peers`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uuid: myUuid })
+        });
+        const data = await response.json();
+        log('Registered peer', data);
+        return data.peers;
+      } catch (error) {
+        log('Registration error', error.message);
+        throw error;
+      }
     }
 
     async function pollMessages() {
-      const response = await fetch(`${SIGNALING_SERVER}/peers/${myUuid}/messages`);
-      const data = await response.json();
-      return data.messages;
+      try {
+        const response = await fetch(`${SIGNALING_SERVER}/peers/${myUuid}/messages`);
+        const data = await response.json();
+        if (data.messages.length > 0) {
+          log('Received messages', data.messages.length);
+        }
+        return data.messages;
+      } catch (error) {
+        log('Polling error', error.message);
+        throw error;
+      }
     }
 
     async function sendToPeer(targetUuid, type, data) {
-      await fetch(`${SIGNALING_SERVER}/peers/${targetUuid}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type,
-          data,
-          from: myUuid
-        })
-      });
+      try {
+        await fetch(`${SIGNALING_SERVER}/peers/${targetUuid}/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type,
+            data,
+            from: myUuid
+          })
+        });
+        log('Sent message', { to: targetUuid, type });
+      } catch (error) {
+        log('Send error', error.message);
+        throw error;
+      }
     }
 
-    // WebRTC helper functions
     function createPeerConnection(targetUuid) {
       if (peers.has(targetUuid)) {
         return peers.get(targetUuid);
       }
 
+      log('Creating peer connection', targetUuid);
       const pc = new RTCPeerConnection(iceServers);
       peers.set(targetUuid, pc);
 
-      // Add our video/audio tracks
-      localStream.getTracks().forEach(track => {
-        pc.addTrack(track, localStream);
-      });
-
-      // Handle ICE candidates
       pc.onicecandidate = (event) => {
         if (event.candidate) {
+          log('ICE candidate', { targetUuid, candidate: event.candidate.candidate });
           sendToPeer(targetUuid, 'ice-candidate', event.candidate);
         }
       };
 
-      // Handle incoming tracks
+      pc.oniceconnectionstatechange = () => {
+        log('ICE state change', { targetUuid, state: pc.iceConnectionState });
+      };
+
+      pc.onconnectionstatechange = () => {
+        log('Connection state change', { targetUuid, state: pc.connectionState });
+      };
+
+      pc.onnegotiationneeded = () => {
+        log('Negotiation needed', targetUuid);
+      };
+
       pc.ontrack = (event) => {
+        log('Received tracks', {
+          targetUuid,
+          tracks: event.streams[0].getTracks().map(t => ({
+            kind: t.kind,
+            enabled: t.enabled,
+            readyState: t.readyState
+          }))
+        });
         displayVideo(targetUuid, event.streams[0]);
       };
+
+      // Add our video/audio tracks
+      localStream.getTracks().forEach(track => {
+        log('Adding local track', {
+          targetUuid,
+          kind: track.kind,
+          enabled: track.enabled
+        });
+        pc.addTrack(track, localStream);
+      });
 
       return pc;
     }
 
-    // UI functions
     function displayVideo(uuid, stream) {
       let container = document.getElementById(`video-${uuid}`);
       
@@ -159,7 +229,22 @@
         const video = document.createElement('video');
         video.autoplay = true;
         video.playsInline = true;
-        if (uuid === myUuid) video.muted = true;
+        
+        video.onloadedmetadata = () => {
+          log('Video loaded', uuid);
+        };
+        
+        video.onplay = () => {
+          log('Video playing', uuid);
+        };
+        
+        video.onerror = (e) => {
+          log('Video error', { uuid, error: e.target.error });
+        };
+        
+        if (uuid === myUuid) {
+          video.muted = true;
+        }
         
         const label = document.createElement('div');
         label.className = 'peerId';
@@ -172,22 +257,29 @@
       
       const video = container.querySelector('video');
       if (video.srcObject !== stream) {
+        log('Setting stream', {
+          uuid,
+          tracks: stream.getTracks().map(t => ({
+            kind: t.kind,
+            enabled: t.enabled,
+            readyState: t.readyState
+          }))
+        });
         video.srcObject = stream;
+        video.play().catch(e => log('Play error', { uuid, error: e.message }));
       }
     }
 
-    function updateStatus(text) {
-      statusDiv.textContent = text;
-    }
-
-    // Message handling
     async function handleMessage(message) {
       const { type, data, from } = message;
-      const pc = createPeerConnection(from);
+      log('Handling message', { type, from });
 
       try {
+        const pc = createPeerConnection(from);
+
         switch (type) {
           case 'offer':
+            log('Processing offer', from);
             await pc.setRemoteDescription(new RTCSessionDescription(data));
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
@@ -195,43 +287,42 @@
             break;
 
           case 'answer':
+            log('Processing answer', from);
             await pc.setRemoteDescription(new RTCSessionDescription(data));
             break;
 
           case 'ice-candidate':
             if (data) {
+              log('Adding ICE candidate', from);
               await pc.addIceCandidate(new RTCIceCandidate(data));
             }
             break;
         }
       } catch (error) {
-        console.error('Error handling message:', error);
+        log('Message handling error', { type, from, error: error.message });
       }
     }
 
-    // Main polling loop
     async function pollLoop() {
       if (!isPolling) return;
 
       try {
-        // Register and get active peers
         const activePeers = await registerPeer();
         
-        // Connect to new peers
         for (const peerUuid of activePeers) {
           if (!peers.has(peerUuid)) {
             const pc = createPeerConnection(peerUuid);
             try {
+              log('Creating offer', peerUuid);
               const offer = await pc.createOffer();
               await pc.setLocalDescription(offer);
               await sendToPeer(peerUuid, 'offer', offer);
             } catch (error) {
-              console.error('Error creating offer:', error);
+              log('Offer creation error', { peerUuid, error: error.message });
             }
           }
         }
 
-        // Check for messages
         const messages = await pollMessages();
         for (const message of messages) {
           await handleMessage(message);
@@ -239,14 +330,17 @@
 
         updateStatus(`Connected (${peers.size + 1} peers)`);
       } catch (error) {
-        console.error('Polling error:', error);
+        log('Polling error', error.message);
         updateStatus('Connection error - retrying...');
       }
 
       setTimeout(pollLoop, POLL_INTERVAL);
     }
 
-    // Join button handler
+    function updateStatus(text) {
+      statusDiv.textContent = text;
+    }
+
     joinBtn.onclick = async () => {
       const password = passwordInput.value.trim();
       if (password !== 'osopanda') {
@@ -255,33 +349,35 @@
       }
 
       try {
-        // Generate UUID for this session
         myUuid = 'user-' + Math.random().toString(36).substr(2, 9);
+        log('Starting session', myUuid);
         
-        // Get camera/mic permission
+        updateStatus('Accessing camera...');
         localStream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: true
         });
+        log('Got local stream', {
+          tracks: localStream.getTracks().map(t => ({
+            kind: t.kind,
+            enabled: t.enabled
+          }))
+        });
 
-        // Show video grid
         loginForm.style.display = 'none';
         videoGrid.style.display = 'grid';
         
-        // Display our video
         displayVideo(myUuid, localStream);
         
-        // Start polling
         isPolling = true;
         pollLoop();
 
       } catch (error) {
+        log('Setup error', error.message);
         errorMessage.textContent = 'Could not access camera/microphone: ' + error.message;
-        console.error('Setup error:', error);
       }
     };
 
-    // Cleanup on page unload
     window.addEventListener('beforeunload', async () => {
       isPolling = false;
       
@@ -290,8 +386,9 @@
           await fetch(`${SIGNALING_SERVER}/peers/${myUuid}`, { 
             method: 'DELETE'
           });
+          log('Cleanup successful');
         } catch (error) {
-          console.error('Cleanup error:', error);
+          log('Cleanup error', error.message);
         }
       }
       
