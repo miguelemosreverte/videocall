@@ -2,15 +2,20 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Simple Video Call with Avatars</title>
+  <title>Full-Screen WebRTC Call with Avatars & Bandwidth Fallback</title>
   <style>
-    body {
-      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    /* Force full window layout */
+    html, body {
       margin: 0;
       padding: 0;
+      width: 100%;
+      height: 100%;
       background: #e5e5e5;
-      color: #333;
+      overflow: hidden; /* Avoid page scrollbars */
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
     }
+
+    /* The green banner */
     header {
       display: flex;
       align-items: center;
@@ -21,28 +26,38 @@
       font-size: 24px;
       font-weight: bold;
     }
+
+    /* Container for user selection, etc. */
     #mainContainer {
-      max-width: 900px;
-      margin: 20px auto;
-      background: white;
-      border-radius: 8px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: calc(100% - 80px); /* subtract header height approx */
       padding: 20px;
-      min-height: 80vh;
+      box-sizing: border-box;
     }
-    .hidden {
-      display: none;
-    }
+
+    /* Hide once we join */
+    .hidden { display: none; }
+
+    /* Avatar selection row */
     #userSelection {
       display: flex;
       flex-direction: row;
-      justify-content: space-around;
+      gap: 30px;
       margin-bottom: 30px;
     }
+
     .avatarOption {
       text-align: center;
       cursor: pointer;
       transition: transform 0.2s ease;
+      opacity: 1;
+    }
+    .avatarOption.disabled {
+      pointer-events: none;
+      opacity: 0.3;
     }
     .avatarOption:hover {
       transform: scale(1.05);
@@ -55,13 +70,21 @@
       margin-bottom: 10px;
       border: 3px solid transparent;
     }
+    .avatarSelected {
+      border-color: #4CAF50 !important;
+    }
     .avatarName {
       font-weight: bold;
       font-size: 16px;
     }
-    .avatarSelected {
-      border-color: #4CAF50 !important;
+
+    #errorMessage {
+      color: red;
+      font-weight: bold;
+      text-align: center;
+      margin: 10px 0;
     }
+
     #joinButton {
       background: #4CAF50;
       color: white;
@@ -70,32 +93,36 @@
       font-size: 18px;
       border-radius: 6px;
       cursor: pointer;
-      margin: 20px auto;
-      display: block;
+      margin-top: 20px;
     }
     #joinButton:hover {
       background: #45a049;
     }
-    #errorMessage {
-      color: red;
-      font-weight: bold;
-      text-align: center;
-      margin: 10px 0;
-    }
+
+    /* Once joined, entire body becomes the video grid container */
     #videoGrid {
-      display: grid;
+      display: none; /* hidden at first */
+      width: 100%;
+      height: 100%;
+      box-sizing: border-box;
+      gap: 10px;
       grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-      gap: 20px;
-      margin-top: 20px;
+      grid-auto-rows: auto;
+      padding: 10px;
+      background: #111; /* behind videos */
     }
+    /* Once we remove the header, fill the entire screen with grid */
+    .fullScreenGrid {
+      display: grid;
+    }
+
     .videoContainer {
       position: relative;
       background: #000;
       border-radius: 6px;
       overflow: hidden;
       width: 100%;
-      padding-bottom: 56.25%;
-      /* 16:9 ratio – or you can fix height to 300px if you prefer */
+      padding-bottom: 56.25%; /* 16:9 ratio */
     }
     .videoContainer video {
       position: absolute;
@@ -115,19 +142,46 @@
       border-radius: 4px;
       font-size: 14px;
     }
+
+    /* Show a big avatar overlay if we are in "audio-only" fallback */
+    .avatarOverlay {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000; /* or partially transparent if you like */
+      z-index: 1; /* above the video */
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+    .avatarOverlay.active {
+      opacity: 1;
+    }
+    .avatarOverlay img {
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 3px solid #4CAF50;
+    }
+
     #status {
-      position: fixed;
-      top: 20px;
-      right: 20px;
+      position: absolute;
+      top: 10px;
+      right: 10px;
       background: white;
       padding: 10px 20px;
       border-radius: 4px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      font-size: 14px;
+      z-index: 9999;
     }
     #debugInfo {
-      position: fixed;
-      bottom: 20px;
-      left: 20px;
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
       max-width: 400px;
       max-height: 200px;
       overflow: auto;
@@ -137,68 +191,63 @@
       border-radius: 4px;
       font-family: monospace;
       font-size: 12px;
-      z-index: 1000;
+      z-index: 9999;
     }
   </style>
 </head>
 <body>
-  <header>WebRTC Video Call (Choose Your Avatar)</header>
+  <header id="topBanner">Welcome! Select your user</header>
 
   <div id="mainContainer">
-    <!-- Step 1: Choose user/avatar -->
-    <div id="userSelection" class="hidden"></div>
-
+    <!-- Avatars to choose from -->
+    <div id="userSelection"></div>
+    <!-- Error messages -->
     <div id="errorMessage"></div>
-
-    <!-- Step 2: Join button -->
+    <!-- Join button -->
     <button id="joinButton" class="hidden">Join Call</button>
-
-    <!-- Step 3: Videos -->
-    <div id="videoGrid"></div>
   </div>
 
-  <!-- Status + debug overlays -->
+  <!-- The full-screen video grid (hidden until user joins) -->
+  <div id="videoGrid"></div>
+
+  <!-- Debug info overlays -->
   <div id="status">Ready</div>
   <div id="debugInfo"></div>
 
   <script>
-    // ================================
-    // Adjust to match your server
-    // ================================
+    // =========================================================================
+    // CONFIG
+    // =========================================================================
     const SIGNALING_SERVER = 'https://193.124.115.137:3000';
 
-    // We'll do "smart" poll intervals
-    let currentPollInterval = 2000;  // start at 2s
-    const minPollInterval = 2000;    // 2s
-    const maxPollInterval = 10000;   // 10s
+    // Hardcoded user list (and their avatars)
+    const users = [
+      { name: "Miguel",      avatar: "avatar-0.webp" },
+      { name: "Anastasiia",  avatar: "avatar-6.webp" },
+      { name: "Mariana",     avatar: "avatar-5.webp" }
+    ];
+
+    // For “smart poll”
     let lastPeerCount = 0;
+    let hasChanges = false;
+    const minPollInterval = 2000;
+    const maxPollInterval = 10000;
 
-    // DOM
-    const userSelectionDiv = document.getElementById('userSelection');
-    const joinButton = document.getElementById('joinButton');
-    const errorMessage = document.getElementById('errorMessage');
-    const videoGrid = document.getElementById('videoGrid');
-    const statusDiv = document.getElementById('status');
-    const debugInfo = document.getElementById('debugInfo');
+    // DOM elements
+    const topBanner       = document.getElementById('topBanner');
+    const mainContainer   = document.getElementById('mainContainer');
+    const userSelection   = document.getElementById('userSelection');
+    const errorMessage    = document.getElementById('errorMessage');
+    const joinButton      = document.getElementById('joinButton');
+    const videoGrid       = document.getElementById('videoGrid');
+    const statusDiv       = document.getElementById('status');
+    const debugInfo       = document.getElementById('debugInfo');
 
-    // We'll store the chosen "username" as myUuid
+    // State
     let myUuid = null;
     let localStream = null;
     let isPolling = false;
-    const peers = new Map(); // Map peerUuid -> { pc, iceCandidates: [], hasRemoteDescription: false }
-
-    // For the "smart poll" logic
-    let hasChanges = false;
-
-    // Simple logger
-    function log(message, data = null) {
-      const time = new Date().toLocaleTimeString();
-      const text = data
-        ? `${time} - ${message}: ${JSON.stringify(data)}`
-        : `${time} - ${message}`;
-      console.log(message, data);
-      debugInfo.innerHTML = text + '<br>' + debugInfo.innerHTML;
-    }
+    const peers = new Map(); // peerUuid => { pc, iceCandidates, hasRemoteDescription, container?, avatarOverlayElem? }
 
     // ICE config
     const iceServers = {
@@ -209,138 +258,170 @@
       ]
     };
 
-    // -----------
-    // On startup, load users.json so we can show them
-    // -----------
+    // =========================================================================
+    // LOG + UTILS
+    // =========================================================================
+    function log(msg, data = null) {
+      const time = new Date().toLocaleTimeString();
+      const text = data ? `${time} - ${msg}: ${JSON.stringify(data)}` : `${time} - ${msg}`;
+      console.log(msg, data);
+      debugInfo.innerHTML = text + "<br>" + debugInfo.innerHTML;
+    }
+
+    function updateStatus(text) {
+      statusDiv.textContent = text;
+    }
+
+    // =========================================================================
+    // ON LOAD: fetch active peers, hide those users from the avatar selection
+    // =========================================================================
     window.addEventListener('load', async () => {
       try {
-        const resp = await fetch('users.json');  // must be in same folder
-        if (!resp.ok) {
-          throw new Error(`Failed to load users.json: ${resp.status}`);
-        }
-        const users = await resp.json();
-        showUserSelection(users);
+        const activePeers = await fetchActivePeers();
+        showUserSelection(users, activePeers);
       } catch (error) {
-        console.error('Could not load users.json:', error);
+        log('Error loading active peers', error.message);
+        // We'll still show all users if we can't fetch
+        showUserSelection(users, []);
       }
     });
 
-    function showUserSelection(users) {
-      userSelectionDiv.classList.remove('hidden');
+    async function fetchActivePeers() {
+      const url = `${SIGNALING_SERVER}/peers`;
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(`fetchActivePeers() failed: ${resp.status} - ${text}`);
+      }
+      const data = await resp.json();
+      return data.peers || [];
+    }
 
-      users.forEach((u, index) => {
+    // =========================================================================
+    // SHOW/HIDE AVAILABLE USERS
+    // =========================================================================
+    function showUserSelection(allUsers, takenList) {
+      userSelection.innerHTML = '';
+
+      allUsers.forEach(u => {
         const wrapper = document.createElement('div');
         wrapper.className = 'avatarOption';
+
+        // If user is taken, add .disabled
+        if (takenList.includes(u.name)) {
+          wrapper.classList.add('disabled');
+        }
 
         const img = document.createElement('img');
         img.src = u.avatar;
         img.alt = u.name;
         img.className = 'avatarImage';
-        img.id = `avatar-${u.name}`;
-
-        // When user clicks on an avatar
-        img.onclick = () => {
-          // Clear all border highlights
-          document.querySelectorAll('.avatarImage').forEach(elem => {
-            elem.classList.remove('avatarSelected');
-          });
-          // Highlight the chosen one
-          img.classList.add('avatarSelected');
-
-          // Set global myUuid
-          myUuid = u.name;
-          errorMessage.textContent = '';
-          joinButton.classList.remove('hidden');
-        };
 
         const label = document.createElement('div');
         label.className = 'avatarName';
         label.textContent = u.name;
 
+        // On click => select if not disabled
+        wrapper.onclick = () => {
+          if (wrapper.classList.contains('disabled')) {
+            return; // cannot choose
+          }
+          // Clear previous selections
+          document.querySelectorAll('.avatarImage').forEach(el => el.classList.remove('avatarSelected'));
+          img.classList.add('avatarSelected');
+
+          myUuid = u.name;
+          errorMessage.textContent = '';
+          joinButton.classList.remove('hidden');
+        };
+
         wrapper.appendChild(img);
         wrapper.appendChild(label);
-        userSelectionDiv.appendChild(wrapper);
+        userSelection.appendChild(wrapper);
       });
     }
 
-    // -----------
-    // Join button logic
-    // -----------
+    // =========================================================================
+    // JOIN BUTTON
+    // =========================================================================
     joinButton.onclick = async () => {
       if (!myUuid) {
-        errorMessage.textContent = 'Please select a user/avatar first!';
+        errorMessage.textContent = 'Please select a user/avatar!';
         return;
       }
       joinButton.disabled = true;
       errorMessage.textContent = '';
 
-      updateStatus(`Accessing camera for user "${myUuid}"...`);
+      updateStatus(`Accessing camera for "${myUuid}"...`);
       log('Starting session', myUuid);
 
       try {
-        // 1) Get local stream
+        // 1) Get local media
         localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         log('Got local stream', {
           tracks: localStream.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled }))
         });
-        displayVideo(myUuid, localStream);
 
-        // 2) Register the user
-        //    If 409 => the user is taken
+        // Display local feed
+        createOrUpdateVideoContainer(myUuid, localStream, /* isLocal */ true);
+
+        // 2) Register
         await registerPeer(myUuid);
 
-        // 3) Start polling
+        // 3) Hide the header & main container, show the video grid full screen
+        topBanner.style.display = 'none';
+        mainContainer.style.display = 'none';
+        videoGrid.style.display = 'grid';
+        videoGrid.classList.add('fullScreenGrid');
+
+        // 4) Start the poll loop + bandwidth monitor
         isPolling = true;
         pollLoop();
+        monitorConnection(); // checks stats periodically
 
         updateStatus(`Connected as "${myUuid}"`);
-        joinButton.style.display = 'none';
-        userSelectionDiv.classList.add('hidden');
-      } catch (error) {
+      } catch (err) {
         joinButton.disabled = false;
-        log('Setup error', error.message);
-        errorMessage.textContent = error.message;
+        log('Setup error', err.message);
+        errorMessage.textContent = err.message;
       }
     };
 
     async function registerPeer(uuid) {
-      // POST /peers
       const resp = await fetch(`${SIGNALING_SERVER}/peers`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ uuid })
       });
       if (resp.status === 409) {
-        throw new Error(`User "${uuid}" is already taken!`);
+        throw new Error(`User "${uuid}" is already in use!`);
       }
       if (!resp.ok) {
-        const text = await resp.text();
-        throw new Error(`Registration failed: ${resp.status} ${resp.statusText} - ${text}`);
+        const txt = await resp.text();
+        throw new Error(`Registration failed: ${resp.status} - ${txt}`);
       }
       const data = await resp.json();
-      log('Registered with server (once)', data);
+      log('Registered with server', data);
       return data;
     }
 
-    // -----------
-    // Poll loop: uses dynamic intervals
-    // -----------
+    // =========================================================================
+    // POLL LOOP (SMART INTERVAL)
+    // =========================================================================
     async function pollLoop() {
       if (!isPolling) return;
 
       try {
-        // 1) Get active peers
-        const activePeers = await getActivePeers();
-        // If peer count changed => we have changes
+        // 1) Check active peers
+        const activePeers = await fetchActivePeers();
         if (activePeers.length !== lastPeerCount) {
           hasChanges = true;
           lastPeerCount = activePeers.length;
         }
 
-        // Create offers to bigger IDs if needed
+        // 2) Create offers if myUuid < peerUuid and no PC yet
         for (const peerUuid of activePeers) {
-          if (peerUuid === myUuid) continue;
-          // Only offer if myUuid < peerUuid
+          if (peerUuid === myUuid) continue; 
           if (myUuid < peerUuid) {
             if (!peers.has(peerUuid)) {
               const pc = createPeerConnection(peerUuid);
@@ -353,48 +434,23 @@
           }
         }
 
-        // 2) Poll messages
+        // 3) Poll messages
         const messages = await pollMessages();
         if (messages.length > 0) {
           hasChanges = true;
         }
         for (const msg of messages) {
-          await handleMessage(msg);
+          await handleSignalMessage(msg);
         }
-
-      } catch (error) {
-        log('Polling error', error.message);
+      } catch (err) {
+        log('Polling error', err.message);
         updateStatus('Connection error - retrying...');
       }
 
-      // Decide next poll interval
-      let nextInterval;
-      if (hasChanges) {
-        nextInterval = minPollInterval; // 2s
-        hasChanges = false; // reset flag
-      } else {
-        nextInterval = maxPollInterval; // 10s
-      }
-
+      // Next interval
+      const nextInterval = hasChanges ? minPollInterval : maxPollInterval;
+      hasChanges = false;
       setTimeout(pollLoop, nextInterval);
-    }
-
-    async function getActivePeers() {
-      try {
-        const url = `${SIGNALING_SERVER}/peers`;
-        const response = await fetch(url);
-        if (!response.ok) {
-          const text = await response.text();
-          log(`getActivePeers() failed - ${response.status} ${response.statusText}`, { url, body: text });
-          throw new Error(`Fetch failed: ${response.status} ${response.statusText}`);
-        }
-        const data = await response.json();
-        log('Fetched peer list', data);
-        return data.peers || [];
-      } catch (error) {
-        log('Error fetching peers', error.message);
-        throw error;
-      }
     }
 
     async function pollMessages() {
@@ -402,18 +458,17 @@
         const url = `${SIGNALING_SERVER}/peers/${myUuid}/messages`;
         const resp = await fetch(url);
         if (!resp.ok) {
-          const text = await resp.text();
-          log(`pollMessages() failed - ${resp.status} ${resp.statusText}`, { url, body: text });
-          throw new Error(`Poll failed: ${resp.status}`);
+          const txt = await resp.text();
+          log('pollMessages failed', { status: resp.status, body: txt });
+          throw new Error(`pollMessages() error: ${resp.status}`);
         }
         const data = await resp.json();
         if (data.messages.length > 0) {
           log('Received messages', { count: data.messages.length });
         }
         return data.messages;
-      } catch (error) {
-        log('Polling error', error.message);
-        throw error;
+      } catch (err) {
+        throw err;
       }
     }
 
@@ -426,74 +481,80 @@
           body: JSON.stringify({ type, data, from: myUuid })
         });
         if (!resp.ok) {
-          const text = await resp.text();
-          log(`sendToPeer() failed - ${resp.status} ${resp.statusText}`, { url, body: text });
-          throw new Error(`Send failed: ${resp.status}`);
+          const txt = await resp.text();
+          log(`sendToPeer() fail - ${resp.status}`, { body: txt });
+          throw new Error(`sendToPeer error: ${resp.status}`);
         }
         log('Sent message', { to: targetUuid, type });
-      } catch (error) {
-        log('Send error', error.message);
-        throw error;
+      } catch (err) {
+        log('Send error', err.message);
       }
     }
 
-    // ----------------------
-    // WebRTC
-    // ----------------------
+    // =========================================================================
+    // WEBRTC
+    // =========================================================================
     function createPeerConnection(targetUuid) {
       if (peers.has(targetUuid)) {
         return peers.get(targetUuid).pc;
       }
       log('Creating peer connection', targetUuid);
+
       const pc = new RTCPeerConnection(iceServers);
       const peerInfo = {
         pc,
         iceCandidates: [],
-        hasRemoteDescription: false
+        hasRemoteDescription: false,
+        container: null,
+        avatarOverlayElem: null
       };
       peers.set(targetUuid, peerInfo);
 
       pc.onconnectionstatechange = () => {
-        log('Connection state', { targetUuid, state: pc.connectionState });
+        log('connectionState', { targetUuid, state: pc.connectionState });
+        if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+          // fallback to audio (or show avatar)
+          showAvatarOverlay(targetUuid, true);
+        } else if (pc.connectionState === 'connected') {
+          // show video again
+          showAvatarOverlay(targetUuid, false);
+        }
         updateStatus(`Peer ${targetUuid}: ${pc.connectionState}`);
       };
+
       pc.oniceconnectionstatechange = () => {
         log('ICE state', { targetUuid, state: pc.iceConnectionState });
+        if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+          showAvatarOverlay(targetUuid, true);
+        } else if (pc.iceConnectionState === 'connected') {
+          showAvatarOverlay(targetUuid, false);
+        }
       };
-      pc.onicegatheringstatechange = () => {
-        log('ICE gathering state', { targetUuid, state: pc.iceGatheringState });
-      };
+
       pc.onicecandidate = (event) => {
         if (event.candidate) {
           log('Generated ICE candidate', { targetUuid, type: event.candidate.type });
           sendToPeer(targetUuid, 'ice-candidate', event.candidate);
         }
       };
+
       pc.ontrack = (evt) => {
-        log('Received track', {
-          targetUuid,
-          kind: evt.track.kind,
-          readyState: evt.track.readyState
-        });
-        displayVideo(targetUuid, evt.streams[0]);
+        log('Received track', { targetUuid, kind: evt.track.kind });
+        createOrUpdateVideoContainer(targetUuid, evt.streams[0], /* isLocal= */ false);
       };
 
-      // Add local tracks
+      // Add local tracks if we have them
       if (localStream) {
         localStream.getTracks().forEach(track => {
           pc.addTrack(track, localStream);
-          log('Added local track', {
-            targetUuid,
-            kind: track.kind,
-            enabled: track.enabled
-          });
+          log('Added local track', { targetUuid, kind: track.kind });
         });
       }
 
       return pc;
     }
 
-    async function handleMessage(msg) {
+    async function handleSignalMessage(msg) {
       const { type, data, from } = msg;
       log('Handling message', { type, from });
 
@@ -501,51 +562,39 @@
         switch (type) {
           case 'offer': {
             const pc = createPeerConnection(from);
-            log('Setting remote description (offer)', from);
             await pc.setRemoteDescription(new RTCSessionDescription(data));
             peers.get(from).hasRemoteDescription = true;
 
             // Add queued ICE
             const peerInfo = peers.get(from);
             while (peerInfo.iceCandidates.length) {
-              const candidate = peerInfo.iceCandidates.shift();
-              await pc.addIceCandidate(candidate);
-              log('Added queued candidate', from);
+              await pc.addIceCandidate(peerInfo.iceCandidates.shift());
             }
 
-            // Create answer
             const answer = await pc.createAnswer();
-            log('Created answer', from);
             await pc.setLocalDescription(answer);
             await sendToPeer(from, 'answer', answer);
             break;
           }
           case 'answer': {
-            const peerInfo = peers.get(from);
-            if (!peerInfo?.pc) return;
-            log('Setting remote description (answer)', from);
-            await peerInfo.pc.setRemoteDescription(new RTCSessionDescription(data));
-            peerInfo.hasRemoteDescription = true;
-
+            const pi = peers.get(from);
+            if (!pi) return;
+            await pi.pc.setRemoteDescription(new RTCSessionDescription(data));
+            pi.hasRemoteDescription = true;
             // Add queued ICE
-            while (peerInfo.iceCandidates.length) {
-              const candidate = peerInfo.iceCandidates.shift();
-              await peerInfo.pc.addIceCandidate(candidate);
-              log('Added queued candidate', from);
+            while (pi.iceCandidates.length) {
+              await pi.pc.addIceCandidate(pi.iceCandidates.shift());
             }
             break;
           }
           case 'ice-candidate': {
-            const peerInfo = peers.get(from);
-            if (!peerInfo?.pc) return;
+            const pi = peers.get(from);
+            if (!pi) return;
             const candidate = new RTCIceCandidate(data);
-
-            if (!peerInfo.hasRemoteDescription) {
-              log('Queueing ICE candidate', from);
-              peerInfo.iceCandidates.push(candidate);
+            if (!pi.hasRemoteDescription) {
+              pi.iceCandidates.push(candidate);
             } else {
-              log('Adding ICE candidate', from);
-              await peerInfo.pc.addIceCandidate(candidate);
+              await pi.pc.addIceCandidate(candidate);
             }
             break;
           }
@@ -555,59 +604,148 @@
       }
     }
 
-    // Display local/remote video
-    function displayVideo(uuid, stream) {
-      let container = document.getElementById(`video-${uuid}`);
-      if (!container) {
-        container = document.createElement('div');
+    // =========================================================================
+    // CREATE/UPDATE VIDEO CONTAINER
+    // =========================================================================
+    function createOrUpdateVideoContainer(uuid, stream, isLocal) {
+      let peerInfo = peers.get(uuid);
+      // If local user => we might store a dummy
+      if (!peerInfo && isLocal) {
+        peerInfo = {
+          pc: null,
+          iceCandidates: [],
+          hasRemoteDescription: false,
+          container: null,
+          avatarOverlayElem: null
+        };
+        peers.set(uuid, peerInfo);
+      }
+
+      // If we already have a container, reuse
+      if (!peerInfo.container) {
+        // Make a new container
+        const container = document.createElement('div');
         container.className = 'videoContainer';
         container.id = `video-${uuid}`;
 
+        // The video element
         const vid = document.createElement('video');
         vid.autoplay = true;
         vid.playsInline = true;
-        if (uuid === myUuid) {
+        if (isLocal) {
           vid.muted = true;
         }
-
         vid.onloadedmetadata = () => {
           log('Video metadata loaded', uuid);
           vid.play().catch(e => log('Video play error', e.message));
         };
 
+        // Label
         const label = document.createElement('div');
         label.className = 'peerId';
-        label.textContent = (uuid === myUuid) ? `${uuid} (You)` : uuid;
+        label.textContent = isLocal ? `${uuid} (You)` : uuid;
+
+        // Avatar overlay for fallback
+        const overlay = document.createElement('div');
+        overlay.className = 'avatarOverlay';
+        const avatarImg = document.createElement('img');
+        const userObj = users.find(u => u.name === uuid);
+        if (userObj) {
+          avatarImg.src = userObj.avatar;
+        } else {
+          // fallback image if not found
+          avatarImg.src = 'avatar-0.webp';
+        }
+        overlay.appendChild(avatarImg);
 
         container.appendChild(vid);
         container.appendChild(label);
+        container.appendChild(overlay);
+
         videoGrid.appendChild(container);
+
+        peerInfo.container = container;
+        peerInfo.avatarOverlayElem = overlay;
       }
-      const videoElem = container.querySelector('video');
+
+      // Update video track
+      const videoElem = peerInfo.container.querySelector('video');
       if (videoElem.srcObject !== stream) {
-        log('Setting video stream', { uuid, tracks: stream.getTracks().length });
         videoElem.srcObject = stream;
       }
     }
 
-    function updateStatus(text) {
-      statusDiv.textContent = text;
+    // Show/hide the avatar overlay
+    function showAvatarOverlay(uuid, show) {
+      const pi = peers.get(uuid);
+      if (!pi || !pi.avatarOverlayElem) return;
+      if (show) {
+        pi.avatarOverlayElem.classList.add('active');
+      } else {
+        pi.avatarOverlayElem.classList.remove('active');
+      }
     }
 
-    // Cleanup on unload
+    // =========================================================================
+    // SIMPLE BANDWIDTH MONITOR
+    // =========================================================================
+    // Real apps might use getStats() with roundTripTime, framesPerSecond, etc.
+    // Here we do a simple approach: if the connection is "connected" and we see
+    // a very low FPS or repeated stalling, fallback to "audio-only".
+    // Then if it recovers, restore video.
+    // (Implementation is left simple for demonstration.)
+    // =========================================================================
+    function monitorConnection() {
+      // Check stats from each peer
+      peers.forEach((peerInfo, uuid) => {
+        if (!peerInfo.pc) return;
+        const pc = peerInfo.pc;
+
+        pc.getStats(null).then(stats => {
+          // E.g., look for "inbound-rtp" video with low framesPerSecond
+          stats.forEach(report => {
+            if (
+              report.type === 'inbound-rtp' &&
+              report.mediaType === 'video' &&
+              report.framesPerSecond !== undefined
+            ) {
+              // If below 5 fps => fallback to avatar
+              if (report.framesPerSecond < 5) {
+                showAvatarOverlay(uuid, true);
+              } else if (report.framesPerSecond > 10) {
+                // If it recovers => show video again
+                showAvatarOverlay(uuid, false);
+              }
+            }
+          });
+        }).catch(err => {
+          log('getStats error', err.message);
+        });
+      });
+
+      // Repeat every 4s
+      if (isPolling) {
+        setTimeout(monitorConnection, 4000);
+      }
+    }
+
+    // =========================================================================
+    // CLEANUP
+    // =========================================================================
     window.addEventListener('beforeunload', async () => {
       isPolling = false;
       if (myUuid) {
         try {
-          // DELETE /peers/:uuid
           await fetch(`${SIGNALING_SERVER}/peers/${myUuid}`, { method: 'DELETE' });
-          log(`User ${myUuid} disconnected`);
+          log(`User ${myUuid} left`);
         } catch (err) {
           log('Cleanup error', err.message);
         }
       }
-      peers.forEach(peer => {
-        if (peer.pc) peer.pc.close();
+      peers.forEach(pi => {
+        if (pi.pc) {
+          pi.pc.close();
+        }
       });
       if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
