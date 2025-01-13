@@ -1,0 +1,14 @@
+[
+  {
+    "name": "Alice",
+    "avatar": "avatar1.png"
+  },
+  {
+    "name": "Bob",
+    "avatar": "avatar2.png"
+  },
+  {
+    "name": "Carol",
+    "avatar": "avatar3.png"
+  }
+]
