@@ -16,9 +16,6 @@
             margin: 0;
             background-color: #f0f0f0;
         }
-        h1 {
-            color: #333;
-        }
         #videoGrid {
             display: grid;
             grid-template-columns: repeat(auto-fill, 300px);
@@ -33,10 +30,11 @@
             object-fit: cover;
             border-radius: 8px;
         }
-        #status {
-            margin-top: 20px;
-            font-weight: bold;
-            color: #666;
+        #controls {
+            margin: 20px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
         }
         button {
             padding: 10px 20px;
@@ -46,254 +44,189 @@
             border: none;
             border-radius: 5px;
             cursor: pointer;
-            margin: 10px;
-        }
-        button:hover {
-            background-color: #45a049;
         }
         button:disabled {
             background-color: #cccccc;
             cursor: not-allowed;
         }
-        #participantsList {
-            margin-top: 20px;
-            padding: 10px;
-            background-color: white;
+        #status {
+            margin: 20px;
+            padding: 10px 20px;
             border-radius: 5px;
-            min-width: 200px;
+            background-color: white;
             text-align: center;
         }
-        .error {
-            color: #ff0000;
-            margin: 10px 0;
+        .waiting {
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
         }
     </style>
 </head>
 <body>
     <h1>Global Video Conference</h1>
-    <button id="joinButton">Join Meeting</button>
-    <button id="leaveButton" style="display: none;">Leave Meeting</button>
-    <div id="videoGrid"></div>
+    <div id="controls">
+        <button id="joinButton">Join Meeting</button>
+    </div>
     <div id="status">Click 'Join Meeting' to start</div>
-    <div id="participantsList">Participants: 0</div>
+    <div id="videoGrid"></div>
 
     <script>
         const videoGrid = document.getElementById('videoGrid');
         const statusElement = document.getElementById('status');
         const joinButton = document.getElementById('joinButton');
-        const leaveButton = document.getElementById('leaveButton');
-        const participantsList = document.getElementById('participantsList');
         
         let peer = null;
         let myStream = null;
-        let connections = new Map();
-        let retryCount = 0;
-        const MAX_RETRIES = 3;
+        let isHost = false;
+        let connected = false;
 
-        function initializePeer() {
-            // Create a new Peer with specific configuration
-            peer = new Peer({
-                host: 'peerjs.092001.xyz', // You might need to change this to a different PeerJS server
-                secure: true,
-                port: 443,
-                config: {
-                    'iceServers': [
-                        { urls: 'stun:stun.l.google.com:19302' },
-                        { urls: 'stun:stun1.l.google.com:19302' },
-                        { urls: 'stun:stun2.l.google.com:19302' },
-                        { urls: 'stun:stun3.l.google.com:19302' },
-                        { urls: 'stun:stun4.l.google.com:19302' }
-                    ]
-                },
-                debug: 3
-            });
-
-            setupPeerEvents();
-        }
-
-        function setupPeerEvents() {
+        // Initialize PeerJS with just the default settings
+        function initPeer() {
+            // Using default public PeerJS server
+            peer = new Peer();
+            
             peer.on('open', id => {
-                console.log('My peer ID is: ' + id);
-                statusElement.textContent = 'Connected! Click Join Meeting to start';
+                console.log('Connected with ID:', id);
+                statusElement.textContent = 'Connected to server. Click Join Meeting to start.';
                 joinButton.disabled = false;
             });
 
-            peer.on('error', handlePeerError);
-            
-            peer.on('connection', conn => {
-                handleConnection(conn);
-            });
-            
-            peer.on('call', handleIncomingCall);
-        }
-
-        function handlePeerError(error) {
-            console.error('PeerJS error:', error);
-            statusElement.textContent = `Error: ${error.type}`;
-            statusElement.className = 'error';
-
-            if (error.type === 'server-error' || error.type === 'network') {
-                if (retryCount < MAX_RETRIES) {
-                    retryCount++;
-                    statusElement.textContent = `Connection failed. Retrying... (${retryCount}/${MAX_RETRIES})`;
-                    setTimeout(() => {
-                        peer.destroy();
-                        initializePeer();
-                    }, 2000);
+            peer.on('error', error => {
+                console.error('PeerJS error:', error);
+                if (error.type === 'peer-unavailable') {
+                    // This is expected when we're the first peer
+                    isHost = true;
+                    statusElement.classList.add('waiting');
+                    statusElement.textContent = 'Waiting for others to join...';
                 } else {
-                    statusElement.textContent = 'Could not connect to server. Please try again later.';
-                    joinButton.disabled = false;
+                    statusElement.textContent = 'Connection error. Please try again.';
+                    resetConnection();
                 }
-            }
-        }
+            });
 
-        joinButton.addEventListener('click', async () => {
-            joinButton.disabled = true;
-            statusElement.textContent = 'Requesting camera access...';
-            
-            try {
-                myStream = await navigator.mediaDevices.getUserMedia({ 
-                    video: true, 
-                    audio: true 
-                });
+            peer.on('call', call => {
+                console.log('Receiving call from:', call.peer);
+                call.answer(myStream);
                 
-                addVideoStream(myStream, 'my-video');
-                joinButton.style.display = 'none';
-                leaveButton.style.display = 'inline-block';
-                statusElement.textContent = 'Connected to meeting';
-                updateParticipantCount();
-                broadcastPresence();
-            } catch (error) {
-                console.error('Failed to get media devices:', error);
-                statusElement.textContent = 'Error accessing camera/microphone';
-                statusElement.className = 'error';
-                joinButton.disabled = false;
-            }
-        });
-
-        leaveButton.addEventListener('click', () => {
-            leaveMeeting();
-        });
-
-        function broadcastPresence() {
-            peer.listAllPeers(peers => {
-                peers.forEach(peerId => {
-                    if (peerId !== peer.id && !connections.has(peerId)) {
-                        connectToPeer(peerId);
+                call.on('stream', remoteStream => {
+                    if (!document.getElementById(`video-${call.peer}`)) {
+                        addVideoStream(remoteStream, call.peer);
+                        connected = true;
+                        statusElement.classList.remove('waiting');
+                        statusElement.textContent = 'Connected to meeting';
                     }
                 });
             });
         }
 
-        function connectToPeer(peerId) {
-            if (myStream && peerId !== peer.id) {
-                const call = peer.call(peerId, myStream);
-                const conn = peer.connect(peerId);
+        joinButton.addEventListener('click', async () => {
+            try {
+                joinButton.disabled = true;
+                statusElement.textContent = 'Accessing camera...';
                 
-                connections.set(peerId, { call, conn });
-                
-                call.on('stream', remoteStream => {
-                    addVideoStream(remoteStream, peerId);
-                    updateParticipantCount();
+                // Get user media
+                myStream = await navigator.mediaDevices.getUserMedia({ 
+                    video: true, 
+                    audio: true 
                 });
                 
-                conn.on('close', () => {
-                    removeConnection(peerId);
-                });
+                // Add our own video
+                addVideoStream(myStream, 'local');
+                
+                // Try to connect to an existing host
+                tryConnect();
+                
+            } catch (error) {
+                console.error('Failed to get user media:', error);
+                statusElement.textContent = 'Could not access camera/microphone';
+                joinButton.disabled = false;
             }
-        }
+        });
 
-        function handleIncomingCall(call) {
-            call.answer(myStream);
+        function tryConnect() {
+            // First try to connect to a known host
+            const call = peer.call('host-peer', myStream);
             
             call.on('stream', remoteStream => {
-                addVideoStream(remoteStream, call.peer);
-                updateParticipantCount();
+                if (!document.getElementById(`video-${call.peer}`)) {
+                    addVideoStream(remoteStream, call.peer);
+                    connected = true;
+                    statusElement.classList.remove('waiting');
+                    statusElement.textContent = 'Connected to meeting';
+                }
+            });
+
+            call.on('error', error => {
+                console.log('Call error, becoming host:', error);
+                // If connection fails, become the host
+                peer.disconnect();
+                peer.destroy();
+                becomeHost();
             });
         }
 
-        function handleConnection(conn) {
-            connections.set(conn.peer, { ...connections.get(conn.peer), conn });
+        function becomeHost() {
+            // Create new peer as host
+            peer = new Peer('host-peer');
+            isHost = true;
             
-            conn.on('close', () => {
-                removeConnection(conn.peer);
+            peer.on('open', id => {
+                console.log('Became host with ID:', id);
+                statusElement.classList.add('waiting');
+                statusElement.textContent = 'Waiting for others to join...';
+            });
+
+            peer.on('call', call => {
+                console.log('Receiving call as host from:', call.peer);
+                call.answer(myStream);
+                
+                call.on('stream', remoteStream => {
+                    if (!document.getElementById(`video-${call.peer}`)) {
+                        addVideoStream(remoteStream, call.peer);
+                        connected = true;
+                        statusElement.classList.remove('waiting');
+                        statusElement.textContent = 'Connected to meeting';
+                    }
+                });
             });
         }
 
         function addVideoStream(stream, peerId) {
-            if (!document.getElementById(`video-${peerId}`)) {
-                const video = document.createElement('video');
-                video.srcObject = stream;
-                video.id = `video-${peerId}`;
-                video.setAttribute('playsinline', true);
-                video.addEventListener('loadedmetadata', () => {
-                    video.play().catch(console.error);
-                });
-                videoGrid.appendChild(video);
-            }
+            const video = document.createElement('video');
+            video.srcObject = stream;
+            video.id = `video-${peerId}`;
+            video.setAttribute('playsinline', true);
+            video.setAttribute('autoplay', true);
+            video.setAttribute('muted', peerId === 'local');
+            videoGrid.appendChild(video);
         }
 
-        function removeConnection(peerId) {
-            const videoElement = document.getElementById(`video-${peerId}`);
-            if (videoElement) {
-                const stream = videoElement.srcObject;
-                if (stream) {
-                    stream.getTracks().forEach(track => track.stop());
-                }
-                videoElement.remove();
-            }
-            
-            const connection = connections.get(peerId);
-            if (connection) {
-                if (connection.call) connection.call.close();
-                if (connection.conn) connection.conn.close();
-                connections.delete(peerId);
-            }
-            
-            updateParticipantCount();
-        }
-
-        function updateParticipantCount() {
-            const count = videoGrid.children.length;
-            participantsList.textContent = `Participants: ${count}`;
-        }
-
-        function leaveMeeting() {
-            // Stop all tracks in my stream
+        function resetConnection() {
             if (myStream) {
                 myStream.getTracks().forEach(track => track.stop());
-                myStream = null;
             }
-            
-            // Close all connections
-            connections.forEach((connection, peerId) => {
-                removeConnection(peerId);
-            });
-            
-            // Clear video grid
-            videoGrid.innerHTML = '';
-            
-            // Reset UI
-            joinButton.style.display = 'inline-block';
-            joinButton.disabled = false;
-            leaveButton.style.display = 'none';
-            statusElement.textContent = 'Left meeting';
-            statusElement.className = '';
-            updateParticipantCount();
-            
-            // Destroy and reinitialize peer
             if (peer) {
+                peer.disconnect();
                 peer.destroy();
             }
-            initializePeer();
+            videoGrid.innerHTML = '';
+            isHost = false;
+            connected = false;
+            joinButton.disabled = false;
+            statusElement.classList.remove('waiting');
+            initPeer();
         }
 
         // Initialize on page load
-        initializePeer();
+        initPeer();
 
-        // Clean up before page unload
+        // Cleanup on page unload
         window.addEventListener('beforeunload', () => {
-            leaveMeeting();
+            resetConnection();
         });
     </script>
 </body>
