@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Full-Screen WebRTC Call with Avatars & Bandwidth Fallback</title>
+  <title>Full-Screen WebRTC Call with Dynamic Grid</title>
   <style>
     /* Force full window layout */
     html, body {
@@ -38,7 +38,6 @@
       box-sizing: border-box;
     }
 
-    /* Hide once we join */
     .hidden { display: none; }
 
     /* Avatar selection row */
@@ -48,7 +47,6 @@
       gap: 30px;
       margin-bottom: 30px;
     }
-
     .avatarOption {
       text-align: center;
       cursor: pointer;
@@ -100,20 +98,18 @@
     }
 
     /* Once joined, entire body becomes the video grid container */
+    /* We'll keep #videoGrid hidden at first, then show it + set display:grid */
     #videoGrid {
-      display: none; /* hidden at first */
+      display: none; /* hidden until user joins */
       width: 100%;
       height: 100%;
       box-sizing: border-box;
-      gap: 10px;
-      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-      grid-auto-rows: auto;
+      background: #111;
       padding: 10px;
-      background: #111; /* behind videos */
-    }
-    /* Once we remove the header, fill the entire screen with grid */
-    .fullScreenGrid {
-      display: grid;
+      /* We'll set grid-template-columns dynamically in JS (adjustGridLayout) */
+      grid-auto-rows: auto;
+      gap: 10px;
+      position: relative; /* for the slider overlay if you want it inside */
     }
 
     .videoContainer {
@@ -142,8 +138,6 @@
       border-radius: 4px;
       font-size: 14px;
     }
-
-    /* Show a big avatar overlay if we are in "audio-only" fallback */
     .avatarOverlay {
       position: absolute;
       top: 0; left: 0;
@@ -151,8 +145,8 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      background: #000; /* or partially transparent if you like */
-      z-index: 1; /* above the video */
+      background: #000;
+      z-index: 1;
       opacity: 0;
       transition: opacity 0.3s ease;
     }
@@ -167,6 +161,28 @@
       border: 3px solid #4CAF50;
     }
 
+    /* The slider UI for manual grid override */
+    #gridControls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(255,255,255,0.85);
+      padding: 6px 12px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #gridControls label {
+      font-size: 14px;
+      color: #333;
+      margin-right: 4px;
+    }
+    #gridControls input {
+      cursor: pointer;
+    }
+
+    /* Overlays */
     #status {
       position: absolute;
       top: 10px;
@@ -208,7 +224,15 @@
   </div>
 
   <!-- The full-screen video grid (hidden until user joins) -->
-  <div id="videoGrid"></div>
+  <div id="videoGrid">
+    <!-- Optional: A small UI to override columns manually -->
+    <div id="gridControls" class="hidden">
+      <label for="colSlider">Manual Grid Columns:</label>
+      <input id="colSlider" type="range" min="1" max="6" step="1" value="0" />
+      <span id="colValue"></span>
+      <button id="resetGrid">Auto</button>
+    </div>
+  </div>
 
   <!-- Debug info overlays -->
   <div id="status">Ready</div>
@@ -216,11 +240,11 @@
 
   <script>
     // =========================================================================
-    // CONFIG
+    // CONFIG & STATE
     // =========================================================================
     const SIGNALING_SERVER = 'https://193.124.115.137:3000';
 
-    // Hardcoded user list (and their avatars)
+    // Hardcoded user list
     const users = [
       { name: "Miguel",      avatar: "avatar-0.webp" },
       { name: "Anastasiia",  avatar: "avatar-6.webp" },
@@ -232,24 +256,30 @@
     let hasChanges = false;
     const minPollInterval = 2000;
     const maxPollInterval = 10000;
+    let isPolling = false;
+
+    // For dynamic grid columns
+    let manualGridOverride = false;
 
     // DOM elements
-    const topBanner       = document.getElementById('topBanner');
-    const mainContainer   = document.getElementById('mainContainer');
-    const userSelection   = document.getElementById('userSelection');
-    const errorMessage    = document.getElementById('errorMessage');
-    const joinButton      = document.getElementById('joinButton');
-    const videoGrid       = document.getElementById('videoGrid');
-    const statusDiv       = document.getElementById('status');
-    const debugInfo       = document.getElementById('debugInfo');
+    const topBanner = document.getElementById('topBanner');
+    const mainContainer = document.getElementById('mainContainer');
+    const userSelectionDiv = document.getElementById('userSelection');
+    const errorMessage = document.getElementById('errorMessage');
+    const joinButton = document.getElementById('joinButton');
+    const videoGrid = document.getElementById('videoGrid');
+    const gridControls = document.getElementById('gridControls');
+    const colSlider = document.getElementById('colSlider');
+    const colValue = document.getElementById('colValue');
+    const resetGridBtn = document.getElementById('resetGrid');
+    const statusDiv = document.getElementById('status');
+    const debugInfo = document.getElementById('debugInfo');
 
-    // State
+    // WebRTC
     let myUuid = null;
     let localStream = null;
-    let isPolling = false;
-    const peers = new Map(); // peerUuid => { pc, iceCandidates, hasRemoteDescription, container?, avatarOverlayElem? }
+    const peers = new Map();
 
-    // ICE config
     const iceServers = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
@@ -259,21 +289,20 @@
     };
 
     // =========================================================================
-    // LOG + UTILS
+    // LOG + STATUS
     // =========================================================================
-    function log(msg, data = null) {
+    function log(msg, data=null) {
       const time = new Date().toLocaleTimeString();
       const text = data ? `${time} - ${msg}: ${JSON.stringify(data)}` : `${time} - ${msg}`;
       console.log(msg, data);
       debugInfo.innerHTML = text + "<br>" + debugInfo.innerHTML;
     }
-
     function updateStatus(text) {
       statusDiv.textContent = text;
     }
 
     // =========================================================================
-    // ON LOAD: fetch active peers, hide those users from the avatar selection
+    // ON LOAD
     // =========================================================================
     window.addEventListener('load', async () => {
       try {
@@ -281,33 +310,34 @@
         showUserSelection(users, activePeers);
       } catch (error) {
         log('Error loading active peers', error.message);
-        // We'll still show all users if we can't fetch
+        // If fail, show all anyway
         showUserSelection(users, []);
       }
+      setupGridControls();
     });
 
     async function fetchActivePeers() {
       const url = `${SIGNALING_SERVER}/peers`;
       const resp = await fetch(url);
       if (!resp.ok) {
-        const text = await resp.text();
-        throw new Error(`fetchActivePeers() failed: ${resp.status} - ${text}`);
+        const txt = await resp.text();
+        throw new Error(`fetchActivePeers() failed: ${resp.status} - ${txt}`);
       }
       const data = await resp.json();
       return data.peers || [];
     }
 
     // =========================================================================
-    // SHOW/HIDE AVAILABLE USERS
+    // USER SELECTION
     // =========================================================================
     function showUserSelection(allUsers, takenList) {
-      userSelection.innerHTML = '';
+      userSelectionDiv.innerHTML = '';
 
       allUsers.forEach(u => {
         const wrapper = document.createElement('div');
         wrapper.className = 'avatarOption';
 
-        // If user is taken, add .disabled
+        // If user is taken, disable
         if (takenList.includes(u.name)) {
           wrapper.classList.add('disabled');
         }
@@ -321,12 +351,9 @@
         label.className = 'avatarName';
         label.textContent = u.name;
 
-        // On click => select if not disabled
+        // On click => pick if not disabled
         wrapper.onclick = () => {
-          if (wrapper.classList.contains('disabled')) {
-            return; // cannot choose
-          }
-          // Clear previous selections
+          if (wrapper.classList.contains('disabled')) return;
           document.querySelectorAll('.avatarImage').forEach(el => el.classList.remove('avatarSelected'));
           img.classList.add('avatarSelected');
 
@@ -337,7 +364,7 @@
 
         wrapper.appendChild(img);
         wrapper.appendChild(label);
-        userSelection.appendChild(wrapper);
+        userSelectionDiv.appendChild(wrapper);
       });
     }
 
@@ -346,40 +373,43 @@
     // =========================================================================
     joinButton.onclick = async () => {
       if (!myUuid) {
-        errorMessage.textContent = 'Please select a user/avatar!';
+        errorMessage.textContent = 'Please select a user!';
         return;
       }
       joinButton.disabled = true;
       errorMessage.textContent = '';
-
       updateStatus(`Accessing camera for "${myUuid}"...`);
       log('Starting session', myUuid);
 
       try {
-        // 1) Get local media
+        // 1) local stream
         localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         log('Got local stream', {
           tracks: localStream.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled }))
         });
 
-        // Display local feed
-        createOrUpdateVideoContainer(myUuid, localStream, /* isLocal */ true);
+        // display local
+        createOrUpdateVideoContainer(myUuid, localStream, true);
 
-        // 2) Register
+        // 2) register
         await registerPeer(myUuid);
 
-        // 3) Hide the header & main container, show the video grid full screen
+        // 3) hide banner + main, show full grid
         topBanner.style.display = 'none';
         mainContainer.style.display = 'none';
-        videoGrid.style.display = 'grid';
-        videoGrid.classList.add('fullScreenGrid');
+        videoGrid.style.display = 'grid'; // apply grid layout
+        updateStatus(`Connected as "${myUuid}"`);
 
-        // 4) Start the poll loop + bandwidth monitor
+        // 4) start poll
         isPolling = true;
         pollLoop();
-        monitorConnection(); // checks stats periodically
 
-        updateStatus(`Connected as "${myUuid}"`);
+        // start bandwidth monitor
+        monitorConnection();
+
+        // show the slider controls (optional)
+        gridControls.classList.remove('hidden');
+
       } catch (err) {
         joinButton.disabled = false;
         log('Setup error', err.message);
@@ -406,22 +436,22 @@
     }
 
     // =========================================================================
-    // POLL LOOP (SMART INTERVAL)
+    // POLL LOOP
     // =========================================================================
     async function pollLoop() {
       if (!isPolling) return;
 
       try {
-        // 1) Check active peers
+        // 1) active peers
         const activePeers = await fetchActivePeers();
         if (activePeers.length !== lastPeerCount) {
           hasChanges = true;
           lastPeerCount = activePeers.length;
         }
 
-        // 2) Create offers if myUuid < peerUuid and no PC yet
+        // 2) create offers if needed
         for (const peerUuid of activePeers) {
-          if (peerUuid === myUuid) continue; 
+          if (peerUuid === myUuid) continue;
           if (myUuid < peerUuid) {
             if (!peers.has(peerUuid)) {
               const pc = createPeerConnection(peerUuid);
@@ -434,12 +464,12 @@
           }
         }
 
-        // 3) Poll messages
-        const messages = await pollMessages();
-        if (messages.length > 0) {
+        // 3) poll messages
+        const msgs = await pollMessages();
+        if (msgs.length > 0) {
           hasChanges = true;
         }
-        for (const msg of messages) {
+        for (const msg of msgs) {
           await handleSignalMessage(msg);
         }
       } catch (err) {
@@ -447,29 +477,25 @@
         updateStatus('Connection error - retrying...');
       }
 
-      // Next interval
+      // next interval
       const nextInterval = hasChanges ? minPollInterval : maxPollInterval;
       hasChanges = false;
       setTimeout(pollLoop, nextInterval);
     }
 
     async function pollMessages() {
-      try {
-        const url = `${SIGNALING_SERVER}/peers/${myUuid}/messages`;
-        const resp = await fetch(url);
-        if (!resp.ok) {
-          const txt = await resp.text();
-          log('pollMessages failed', { status: resp.status, body: txt });
-          throw new Error(`pollMessages() error: ${resp.status}`);
-        }
-        const data = await resp.json();
-        if (data.messages.length > 0) {
-          log('Received messages', { count: data.messages.length });
-        }
-        return data.messages;
-      } catch (err) {
-        throw err;
+      const url = `${SIGNALING_SERVER}/peers/${myUuid}/messages`;
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        const txt = await resp.text();
+        log('pollMessages failed', { status: resp.status, body: txt });
+        throw new Error(`pollMessages() error: ${resp.status}`);
       }
+      const data = await resp.json();
+      if (data.messages.length > 0) {
+        log('Received messages', { count: data.messages.length });
+      }
+      return data.messages;
     }
 
     async function sendToPeer(targetUuid, type, data) {
@@ -482,7 +508,7 @@
         });
         if (!resp.ok) {
           const txt = await resp.text();
-          log(`sendToPeer() fail - ${resp.status}`, { body: txt });
+          log(`sendToPeer fail - ${resp.status}`, { body: txt });
           throw new Error(`sendToPeer error: ${resp.status}`);
         }
         log('Sent message', { to: targetUuid, type });
@@ -513,10 +539,8 @@
       pc.onconnectionstatechange = () => {
         log('connectionState', { targetUuid, state: pc.connectionState });
         if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-          // fallback to audio (or show avatar)
           showAvatarOverlay(targetUuid, true);
         } else if (pc.connectionState === 'connected') {
-          // show video again
           showAvatarOverlay(targetUuid, false);
         }
         updateStatus(`Peer ${targetUuid}: ${pc.connectionState}`);
@@ -540,10 +564,10 @@
 
       pc.ontrack = (evt) => {
         log('Received track', { targetUuid, kind: evt.track.kind });
-        createOrUpdateVideoContainer(targetUuid, evt.streams[0], /* isLocal= */ false);
+        createOrUpdateVideoContainer(targetUuid, evt.streams[0], false);
       };
 
-      // Add local tracks if we have them
+      // add local tracks
       if (localStream) {
         localStream.getTracks().forEach(track => {
           pc.addTrack(track, localStream);
@@ -564,13 +588,11 @@
             const pc = createPeerConnection(from);
             await pc.setRemoteDescription(new RTCSessionDescription(data));
             peers.get(from).hasRemoteDescription = true;
-
             // Add queued ICE
             const peerInfo = peers.get(from);
             while (peerInfo.iceCandidates.length) {
               await pc.addIceCandidate(peerInfo.iceCandidates.shift());
             }
-
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             await sendToPeer(from, 'answer', answer);
@@ -605,11 +627,10 @@
     }
 
     // =========================================================================
-    // CREATE/UPDATE VIDEO CONTAINER
+    // VIDEO ELEMENTS + GRID LAYOUT
     // =========================================================================
     function createOrUpdateVideoContainer(uuid, stream, isLocal) {
       let peerInfo = peers.get(uuid);
-      // If local user => we might store a dummy
       if (!peerInfo && isLocal) {
         peerInfo = {
           pc: null,
@@ -620,15 +641,12 @@
         };
         peers.set(uuid, peerInfo);
       }
-
-      // If we already have a container, reuse
       if (!peerInfo.container) {
-        // Make a new container
+        // create container
         const container = document.createElement('div');
         container.className = 'videoContainer';
         container.id = `video-${uuid}`;
 
-        // The video element
         const vid = document.createElement('video');
         vid.autoplay = true;
         vid.playsInline = true;
@@ -640,42 +658,59 @@
           vid.play().catch(e => log('Video play error', e.message));
         };
 
-        // Label
         const label = document.createElement('div');
         label.className = 'peerId';
         label.textContent = isLocal ? `${uuid} (You)` : uuid;
 
-        // Avatar overlay for fallback
         const overlay = document.createElement('div');
         overlay.className = 'avatarOverlay';
-        const avatarImg = document.createElement('img');
         const userObj = users.find(u => u.name === uuid);
-        if (userObj) {
-          avatarImg.src = userObj.avatar;
-        } else {
-          // fallback image if not found
-          avatarImg.src = 'avatar-0.webp';
-        }
-        overlay.appendChild(avatarImg);
+        const avImg = document.createElement('img');
+        avImg.src = userObj ? userObj.avatar : 'avatar-0.webp';
+        overlay.appendChild(avImg);
 
         container.appendChild(vid);
         container.appendChild(label);
         container.appendChild(overlay);
-
         videoGrid.appendChild(container);
 
         peerInfo.container = container;
         peerInfo.avatarOverlayElem = overlay;
+        adjustGridLayout(); // update columns whenever we add a new container
       }
 
-      // Update video track
       const videoElem = peerInfo.container.querySelector('video');
       if (videoElem.srcObject !== stream) {
         videoElem.srcObject = stream;
       }
     }
 
-    // Show/hide the avatar overlay
+    function adjustGridLayout() {
+      if (manualGridOverride) return; // user slider is in control
+
+      const count = videoGrid.querySelectorAll('.videoContainer').length;
+      if (count <= 1) {
+        // single occupant => 100% width
+        videoGrid.style.gridTemplateColumns = '1fr';
+      } else if (count === 2) {
+        // two => 50% each
+        videoGrid.style.gridTemplateColumns = '1fr 1fr';
+      } else if (count === 3) {
+        // three => ~33% each
+        videoGrid.style.gridTemplateColumns = '1fr 1fr 1fr';
+      } else if (count === 4) {
+        // four => 2x2
+        videoGrid.style.gridTemplateColumns = '1fr 1fr';
+      } else if (count <= 6) {
+        // up to 6 => 3 columns
+        videoGrid.style.gridTemplateColumns = '1fr 1fr 1fr';
+      } else {
+        // more => auto fill
+        videoGrid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(200px, 1fr))';
+      }
+    }
+
+    // Show/hide avatar overlay
     function showAvatarOverlay(uuid, show) {
       const pi = peers.get(uuid);
       if (!pi || !pi.avatarOverlayElem) return;
@@ -689,31 +724,21 @@
     // =========================================================================
     // SIMPLE BANDWIDTH MONITOR
     // =========================================================================
-    // Real apps might use getStats() with roundTripTime, framesPerSecond, etc.
-    // Here we do a simple approach: if the connection is "connected" and we see
-    // a very low FPS or repeated stalling, fallback to "audio-only".
-    // Then if it recovers, restore video.
-    // (Implementation is left simple for demonstration.)
-    // =========================================================================
     function monitorConnection() {
-      // Check stats from each peer
       peers.forEach((peerInfo, uuid) => {
         if (!peerInfo.pc) return;
         const pc = peerInfo.pc;
 
         pc.getStats(null).then(stats => {
-          // E.g., look for "inbound-rtp" video with low framesPerSecond
           stats.forEach(report => {
             if (
               report.type === 'inbound-rtp' &&
               report.mediaType === 'video' &&
-              report.framesPerSecond !== undefined
+              typeof report.framesPerSecond === 'number'
             ) {
-              // If below 5 fps => fallback to avatar
               if (report.framesPerSecond < 5) {
                 showAvatarOverlay(uuid, true);
               } else if (report.framesPerSecond > 10) {
-                // If it recovers => show video again
                 showAvatarOverlay(uuid, false);
               }
             }
@@ -723,10 +748,29 @@
         });
       });
 
-      // Repeat every 4s
       if (isPolling) {
         setTimeout(monitorConnection, 4000);
       }
+    }
+
+    // =========================================================================
+    // GRID CONTROLS (SLIDER)
+    // =========================================================================
+    function setupGridControls() {
+      // Show slider value
+      colSlider.oninput = () => {
+        colValue.textContent = colSlider.value;
+        manualGridOverride = true;
+        // If slider=1 => 1 column, if=2 => 2 columns, etc.
+        videoGrid.style.gridTemplateColumns = `repeat(${colSlider.value}, 1fr)`;
+      };
+      // Reset to auto
+      resetGridBtn.onclick = () => {
+        manualGridOverride = false;
+        colSlider.value = 0;
+        colValue.textContent = '';
+        adjustGridLayout(); // revert to auto logic
+      };
     }
 
     // =========================================================================
@@ -743,9 +787,7 @@
         }
       }
       peers.forEach(pi => {
-        if (pi.pc) {
-          pi.pc.close();
-        }
+        if (pi.pc) pi.pc.close();
       });
       if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
