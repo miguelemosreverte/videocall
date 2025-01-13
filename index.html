@@ -102,13 +102,13 @@
   <div id="debugInfo"></div>
 
   <script>
-    // -------------------------------
-    // Adjust SIGNALING_SERVER as needed
-    // -------------------------------
+    // ==============================
+    // UPDATE THIS to your server
+    // ==============================
     const SIGNALING_SERVER = 'https://193.124.115.137:3000';
-    const POLL_INTERVAL = 1000;
+    const POLL_INTERVAL = 2000; // 2 seconds
 
-    // DOM elements
+    // DOM
     const videoGrid = document.getElementById('videoGrid');
     const joinButton = document.getElementById('joinButton');
     const statusDiv = document.getElementById('status');
@@ -118,9 +118,9 @@
     let myUuid = null;
     let localStream = null;
     let isPolling = false;
-    const peers = new Map(); // key = peerUuid, value = { pc, iceCandidates, hasRemoteDescription }
+    const peers = new Map(); // peerUuid -> { pc, iceCandidates: [], hasRemoteDescription: false }
 
-    // Simple logger (updates #debugInfo & console)
+    // Logger
     function log(message, data = null) {
       const time = new Date().toLocaleTimeString();
       const text = data
@@ -130,22 +130,21 @@
       debugInfo.innerHTML = text + '<br>' + debugInfo.innerHTML;
     }
 
-    // ICE config
+    // ICE servers
     const iceServers = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' }
-        // You can add a TURN server if needed
-      ],
-      iceCandidatePoolSize: 10
+        // Add TURN if needed
+      ]
     };
 
     // -------------------------------
-    // API calls
+    // Server API
     // -------------------------------
     async function registerPeer() {
-      // POST /peers to register
+      // POST /peers
       try {
         const response = await fetch(`${SIGNALING_SERVER}/peers`, {
           method: 'POST',
@@ -162,9 +161,20 @@
     }
 
     async function getActivePeers() {
-      // GET /peers for current list
+      // GET /peers
       try {
-        const response = await fetch(`${SIGNALING_SERVER}/peers`);
+        const url = `${SIGNALING_SERVER}/peers`;
+        const response = await fetch(url);
+
+        if (!response.ok) {
+          const text = await response.text();
+          log(`getActivePeers() failed - ${response.status} ${response.statusText}`, {
+            url,
+            body: text
+          });
+          throw new Error(`Fetch failed: ${response.status} ${response.statusText}`);
+        }
+
         const data = await response.json();
         log('Fetched peer list', data);
         return data.peers || [];
@@ -190,15 +200,12 @@
     }
 
     async function sendToPeer(targetUuid, type, data) {
+      // POST /peers/:uuid/messages
       try {
         await fetch(`${SIGNALING_SERVER}/peers/${targetUuid}/messages`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type,
-            data,
-            from: myUuid
-          })
+          body: JSON.stringify({ type, data, from: myUuid })
         });
         log('Sent message', { to: targetUuid, type });
       } catch (error) {
@@ -211,7 +218,6 @@
     // WebRTC
     // -------------------------------
     function createPeerConnection(targetUuid) {
-      // If we already have a PC, return it
       if (peers.has(targetUuid)) {
         return peers.get(targetUuid).pc;
       }
@@ -226,7 +232,6 @@
       };
       peers.set(targetUuid, peerInfo);
 
-      // Monitor state changes
       pc.onconnectionstatechange = () => {
         log('Connection state', { targetUuid, state: pc.connectionState });
         updateStatus(`Peer ${targetUuid}: ${pc.connectionState}`);
@@ -240,7 +245,6 @@
         log('ICE gathering state', { targetUuid, state: pc.iceGatheringState });
       };
 
-      // Handle ICE candidates
       pc.onicecandidate = (event) => {
         if (event.candidate) {
           log('Generated ICE candidate', { targetUuid, type: event.candidate.type });
@@ -248,7 +252,6 @@
         }
       };
 
-      // Handle incoming tracks
       pc.ontrack = (event) => {
         log('Received track', {
           targetUuid,
@@ -258,7 +261,7 @@
         displayVideo(targetUuid, event.streams[0]);
       };
 
-      // Add local tracks if available
+      // Add local tracks
       if (localStream) {
         localStream.getTracks().forEach(track => {
           pc.addTrack(track, localStream);
@@ -285,7 +288,7 @@
             await pc.setRemoteDescription(new RTCSessionDescription(data));
             peers.get(from).hasRemoteDescription = true;
 
-            // Process queued ICE candidates
+            // Add any queued ICE
             const peerInfo = peers.get(from);
             while (peerInfo.iceCandidates.length) {
               const candidate = peerInfo.iceCandidates.shift();
@@ -300,15 +303,14 @@
             await sendToPeer(from, 'answer', answer);
             break;
           }
-
           case 'answer': {
             const peerInfo = peers.get(from);
-            if (!peerInfo?.pc) return;
+            if (!peerInfo || !peerInfo.pc) return;
             log('Setting remote description (answer)', from);
             await peerInfo.pc.setRemoteDescription(new RTCSessionDescription(data));
             peerInfo.hasRemoteDescription = true;
 
-            // Process queued ICE candidates
+            // Add any queued ICE
             while (peerInfo.iceCandidates.length) {
               const candidate = peerInfo.iceCandidates.shift();
               await peerInfo.pc.addIceCandidate(candidate);
@@ -316,12 +318,11 @@
             }
             break;
           }
-
           case 'ice-candidate': {
             const peerInfo = peers.get(from);
-            if (!peerInfo?.pc) return;
-
+            if (!peerInfo || !peerInfo.pc) return;
             const candidate = new RTCIceCandidate(data);
+
             if (!peerInfo.hasRemoteDescription) {
               log('Queueing ICE candidate', from);
               peerInfo.iceCandidates.push(candidate);
@@ -339,7 +340,6 @@
 
     function displayVideo(uuid, stream) {
       let container = document.getElementById(`video-${uuid}`);
-
       if (!container) {
         container = document.createElement('div');
         container.id = `video-${uuid}`;
@@ -354,7 +354,7 @@
           video.play().catch(e => log('Video play error', e.message));
         };
 
-        // Mute local video so you don't hear your own mic
+        // Mute self
         if (uuid === myUuid) {
           video.muted = true;
         }
@@ -376,30 +376,23 @@
     }
 
     // -------------------------------
-    // Main poll loop
+    // Poll loop
     // -------------------------------
     async function pollLoop() {
       if (!isPolling) return;
 
       try {
-        // 1) Get the current list of peers (no re-register)
+        // 1) Get the full list of peers
         const activePeers = await getActivePeers();
 
-        // 2) For each peer, decide if we should offer
+        // 2) Create offers to peers with bigger IDs
         for (const peerUuid of activePeers) {
-          if (peerUuid === myUuid) {
-            // Skip ourselves
-            continue;
-          }
-
-          // Simple rule: only create an offer if our ID is "less" than the other
-          // (avoids double-offer collisions)
+          if (peerUuid === myUuid) continue;
+          // Only offer if myUuid < peerUuid (avoid double-offer)
           if (myUuid < peerUuid) {
             if (!peers.has(peerUuid)) {
-              // Create a new RTCPeerConnection for this peer
               const pc = createPeerConnection(peerUuid);
               log('Creating offer', peerUuid);
-
               const offer = await pc.createOffer();
               await pc.setLocalDescription(offer);
               await sendToPeer(peerUuid, 'offer', offer);
@@ -407,7 +400,7 @@
           }
         }
 
-        // 3) Check for new messages
+        // 3) Poll for messages
         const messages = await pollMessages();
         for (const msg of messages) {
           await handleMessage(msg);
@@ -418,7 +411,6 @@
         updateStatus('Connection error - retrying...');
       }
 
-      // Schedule next poll
       setTimeout(pollLoop, POLL_INTERVAL);
     }
 
@@ -427,7 +419,7 @@
     }
 
     // -------------------------------
-    // Join button logic
+    // Join button
     // -------------------------------
     joinButton.onclick = async () => {
       try {
@@ -437,20 +429,17 @@
         updateStatus('Accessing camera...');
         log('Starting session', myUuid);
 
-        // 1) Get local media
+        // 1) Local stream
         localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         log('Got local stream', {
-          tracks: localStream.getTracks().map(t => ({
-            kind: t.kind,
-            enabled: t.enabled
-          }))
+          tracks: localStream.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled }))
         });
         displayVideo(myUuid, localStream);
 
-        // 2) Register once
+        // 2) Register peer once
         await registerPeer();
 
-        // 3) Start polling
+        // 3) Start the poll loop
         isPolling = true;
         pollLoop();
 
@@ -473,9 +462,7 @@
       if (myUuid) {
         try {
           // DELETE /peers/:uuid
-          await fetch(`${SIGNALING_SERVER}/peers/${myUuid}`, {
-            method: 'DELETE'
-          });
+          await fetch(`${SIGNALING_SERVER}/peers/${myUuid}`, { method: 'DELETE' });
           log('Cleanup successful');
         } catch (error) {
           log('Cleanup error', error.message);
