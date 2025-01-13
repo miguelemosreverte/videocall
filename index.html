@@ -65,6 +65,25 @@
       max-width: 400px;
       max-height: 200px;
       overflow: auto;
+      z-index: 1000;
+    }
+    #loginForm input {
+      margin: 10px 0;
+      padding: 8px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+    }
+    #loginForm button {
+      margin-top: 10px;
+      padding: 10px 20px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #loginForm button:hover {
+      background: #45a049;
     }
   </style>
 </head>
@@ -103,10 +122,10 @@
         console.log(message, data);
         const time = new Date().toLocaleTimeString();
         const text = data ? `${time} - ${message}: ${JSON.stringify(data)}` : `${time} - ${message}`;
-        debugInfo.innerHTML += text + '<br>';
-        debugInfo.scrollTop = debugInfo.scrollHeight;
+        debugInfo.innerHTML = text + '<br>' + debugInfo.innerHTML;
     }
 
+    // Enhanced ICE servers configuration
     const iceServers = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
@@ -117,6 +136,7 @@
       ]
     };
 
+    // Signaling server API calls
     async function registerPeer() {
       try {
         const response = await fetch(`${SIGNALING_SERVER}/peers`, {
@@ -166,13 +186,18 @@
     }
 
     function createPeerConnection(targetUuid) {
-      if (peers.has(targetUuid)) {
-        return peers.get(targetUuid);
-      }
+      let peerInfo = peers.get(targetUuid);
+      if (peerInfo?.pc) return peerInfo.pc;
 
       log('Creating peer connection', targetUuid);
       const pc = new RTCPeerConnection(iceServers);
-      peers.set(targetUuid, pc);
+      
+      peerInfo = {
+        pc,
+        iceCandidates: [],
+        hasRemoteDescription: false
+      };
+      peers.set(targetUuid, peerInfo);
 
       pc.onicecandidate = (event) => {
         if (event.candidate) {
@@ -183,6 +208,9 @@
 
       pc.oniceconnectionstatechange = () => {
         log('ICE state change', { targetUuid, state: pc.iceConnectionState });
+        if (pc.iceConnectionState === 'connected') {
+          peerInfo.iceCandidates = [];
+        }
       };
 
       pc.onconnectionstatechange = () => {
@@ -272,15 +300,25 @@
 
     async function handleMessage(message) {
       const { type, data, from } = message;
-      log('Handling message', { type, from });
+      const peerInfo = peers.get(from) || {
+        pc: null,
+        iceCandidates: [],
+        hasRemoteDescription: false
+      };
 
       try {
-        const pc = createPeerConnection(from);
-
         switch (type) {
           case 'offer':
             log('Processing offer', from);
+            const pc = createPeerConnection(from);
             await pc.setRemoteDescription(new RTCSessionDescription(data));
+            peerInfo.hasRemoteDescription = true;
+            
+            while (peerInfo.iceCandidates.length) {
+              const candidate = peerInfo.iceCandidates.shift();
+              await pc.addIceCandidate(candidate);
+            }
+            
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             await sendToPeer(from, 'answer', answer);
@@ -288,13 +326,26 @@
 
           case 'answer':
             log('Processing answer', from);
-            await pc.setRemoteDescription(new RTCSessionDescription(data));
+            if (peerInfo.pc && peerInfo.pc.signalingState !== 'stable') {
+              await peerInfo.pc.setRemoteDescription(new RTCSessionDescription(data));
+              peerInfo.hasRemoteDescription = true;
+              
+              while (peerInfo.iceCandidates.length) {
+                const candidate = peerInfo.iceCandidates.shift();
+                await peerInfo.pc.addIceCandidate(candidate);
+              }
+            }
             break;
 
           case 'ice-candidate':
-            if (data) {
+            if (!peerInfo.pc) return;
+            
+            if (!peerInfo.hasRemoteDescription) {
+              log('Queueing ICE candidate', from);
+              peerInfo.iceCandidates.push(new RTCIceCandidate(data));
+            } else {
               log('Adding ICE candidate', from);
-              await pc.addIceCandidate(new RTCIceCandidate(data));
+              await peerInfo.pc.addIceCandidate(new RTCIceCandidate(data));
             }
             break;
         }
@@ -310,7 +361,7 @@
         const activePeers = await registerPeer();
         
         for (const peerUuid of activePeers) {
-          if (!peers.has(peerUuid)) {
+          if (!peers.has(peerUuid) || !peers.get(peerUuid).pc) {
             const pc = createPeerConnection(peerUuid);
             try {
               log('Creating offer', peerUuid);
@@ -328,17 +379,13 @@
           await handleMessage(message);
         }
 
-        updateStatus(`Connected (${peers.size + 1} peers)`);
+        statusDiv.textContent = `Connected (${peers.size + 1} peers)`;
       } catch (error) {
         log('Polling error', error.message);
-        updateStatus('Connection error - retrying...');
+        statusDiv.textContent = 'Connection error - retrying...';
       }
 
       setTimeout(pollLoop, POLL_INTERVAL);
-    }
-
-    function updateStatus(text) {
-      statusDiv.textContent = text;
     }
 
     joinBtn.onclick = async () => {
@@ -352,7 +399,7 @@
         myUuid = 'user-' + Math.random().toString(36).substr(2, 9);
         log('Starting session', myUuid);
         
-        updateStatus('Accessing camera...');
+        statusDiv.textContent = 'Accessing camera...';
         localStream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: true
@@ -392,7 +439,7 @@
         }
       }
       
-      peers.forEach(pc => pc.close());
+      peers.forEach(({ pc }) => pc?.close());
       if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
       }
