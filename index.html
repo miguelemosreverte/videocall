@@ -1,34 +1,24 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Global Video Conference</title>
-    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <meta charset="utf-8" />
+    <title>Video Conference</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            margin: 0;
-            background-color: #f0f0f0;
+        body { 
+            font-family: sans-serif; 
+            margin: 0; 
+            padding: 20px;
+            background: #f0f0f0;
         }
         #videoGrid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, 300px);
-            grid-auto-rows: 300px;
-            gap: 10px;
-            max-width: 1200px;
-            margin: 20px;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            padding: 20px;
         }
         .videoContainer {
             position: relative;
-            width: 100%;
-            height: 100%;
-            background: #333;
+            background: black;
             border-radius: 8px;
             overflow: hidden;
         }
@@ -41,415 +31,231 @@
             position: absolute;
             bottom: 10px;
             left: 10px;
-            background: rgba(0, 0, 0, 0.7);
+            background: rgba(0,0,0,0.7);
             color: white;
             padding: 5px 10px;
             border-radius: 4px;
             font-size: 12px;
-            z-index: 10;
         }
-        #controls {
-            margin: 20px;
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-        button {
-            padding: 10px 20px;
-            font-size: 16px;
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            transition: background-color 0.3s;
-        }
-        button:hover {
-            background-color: #45a049;
-        }
-        button:disabled {
-            background-color: #cccccc;
-            cursor: not-allowed;
-        }
-        #status, #peerStats {
-            margin: 10px;
-            padding: 15px;
-            background-color: white;
-            border-radius: 5px;
-            text-align: center;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .mediaControls {
-            position: absolute;
-            bottom: 10px;
-            right: 10px;
-            display: flex;
-            gap: 5px;
-            z-index: 10;
-        }
-        .mediaButton {
-            width: 30px;
-            height: 30px;
-            border-radius: 50%;
-            background: rgba(0, 0, 0, 0.7);
-            color: white;
-            border: none;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 0;
-            font-size: 14px;
-        }
-        .muted {
-            background-color: #dc3545;
-        }
-        #connectionInfo {
+        #status {
             position: fixed;
-            top: 10px;
-            right: 10px;
+            top: 20px;
+            right: 20px;
             background: white;
             padding: 10px;
-            border-radius: 5px;
-            font-size: 12px;
+            border-radius: 4px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
     </style>
 </head>
 <body>
-    <h1>Global Video Conference</h1>
-    <div id="controls">
-        <button id="joinButton">Join Meeting</button>
-        <button id="leaveButton" style="display: none; background-color: #dc3545;">Leave Meeting</button>
-    </div>
-    <div id="status">Click 'Join Meeting' to start</div>
-    <div id="peerStats">Connected Peers: 0</div>
+    <div id="status">Initializing...</div>
     <div id="videoGrid"></div>
-    <div id="connectionInfo"></div>
 
     <script>
-        const videoGrid = document.getElementById('videoGrid');
-        const statusElement = document.getElementById('status');
-        const joinButton = document.getElementById('joinButton');
-        const leaveButton = document.getElementById('leaveButton');
-        const peerStats = document.getElementById('peerStats');
-        const connectionInfo = document.getElementById('connectionInfo');
+        const API_BASE = 'http://193.124.115.137:3000/api';
+        const POLL_INTERVAL = 1000; // Poll every second
         
-        let ws = null;
-        let peer = null;
-        let myStream = null;
-        let connections = new Map();
-        let myUUID = generateUUID();
-        let mediaState = { audio: true, video: true };
-        
-        function generateUUID() {
-            return 'pid-' + Math.random().toString(36).substr(2, 9);
+        let myUuid = null;
+        let localStream = null;
+        const peers = new Map(); // uuid -> RTCPeerConnection
+
+        // Initialize WebRTC with STUN server
+        const rtcConfig = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
+        };
+
+        // API Functions
+        async function registerPeer() {
+            const response = await fetch(`${API_BASE}/peers`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uuid: myUuid })
+            });
+            const data = await response.json();
+            return data.peers;
         }
 
-        function updateConnectionInfo(info) {
-            connectionInfo.textContent = info;
+        async function pollMessages() {
+            const response = await fetch(`${API_BASE}/peers/${myUuid}/messages`);
+            const data = await response.json();
+            return data.messages;
         }
 
-        function connectToSignalingServer() {
-            if (ws) {
-                ws.close();
+        async function sendMessage(targetUuid, type, data) {
+            await fetch(`${API_BASE}/peers/${targetUuid}/messages`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    type,
+                    data,
+                    from: myUuid
+                })
+            });
+        }
+
+        // WebRTC Functions
+        function createPeerConnection(targetUuid) {
+            if (peers.has(targetUuid)) {
+                return peers.get(targetUuid);
             }
 
-            try {
-                ws = new WebSocket('wss://193.124.115.137:3000');
-                
-                ws.onopen = () => {
-                    console.log('Connected to signaling server');
-                    updateConnectionInfo('SignalingServer: Connected');
-                    
-                    if (peer) {
-                        ws.send(JSON.stringify({
-                            type: 'register',
-                            peerId: peer.id,
-                            uuid: myUUID
-                        }));
+            const pc = new RTCPeerConnection(rtcConfig);
+            peers.set(targetUuid, pc);
+
+            // Add local tracks
+            localStream.getTracks().forEach(track => {
+                pc.addTrack(track, localStream);
+            });
+
+            // Handle ICE candidates
+            pc.onicecandidate = event => {
+                if (event.candidate) {
+                    sendMessage(targetUuid, 'ice-candidate', event.candidate);
+                }
+            };
+
+            // Handle incoming tracks
+            pc.ontrack = event => {
+                displayVideo(targetUuid, event.streams[0]);
+            };
+
+            return pc;
+        }
+
+        async function handleMessage(message) {
+            const { type, data, from } = message;
+            const pc = createPeerConnection(from);
+
+            switch (type) {
+                case 'offer':
+                    await pc.setRemoteDescription(new RTCSessionDescription(data));
+                    const answer = await pc.createAnswer();
+                    await pc.setLocalDescription(answer);
+                    sendMessage(from, 'answer', answer);
+                    break;
+
+                case 'answer':
+                    await pc.setRemoteDescription(new RTCSessionDescription(data));
+                    break;
+
+                case 'ice-candidate':
+                    if (data) {
+                        await pc.addIceCandidate(new RTCIceCandidate(data));
                     }
-                };
-                
-                ws.onmessage = handleSignalingMessage;
-                
-                ws.onclose = () => {
-                    console.log('Disconnected from signaling server');
-                    updateConnectionInfo('SignalingServer: Disconnected');
-                    setTimeout(connectToSignalingServer, 5000);
-                };
-                
-                ws.onerror = (error) => {
-                    console.error('WebSocket error:', error);
-                    updateConnectionInfo('SignalingServer: Error');
-                };
-            } catch (error) {
-                console.error('Connection error:', error);
-                updateConnectionInfo('SignalingServer: Connection Failed');
-            }
-        }
-
-        function handleSignalingMessage(event) {
-            const data = JSON.parse(event.data);
-            console.log('Received:', data.type);
-
-            switch(data.type) {
-                case 'peers-list':
-                    handlePeersList(data.peers);
-                    break;
-                case 'peer-joined':
-                    handlePeerJoined(data.peerId, data.uuid);
-                    break;
-                case 'peer-left':
-                    handlePeerLeft(data.peerId);
-                    break;
-                case 'signal':
-                    handleSignal(data.peerId, data.signal);
                     break;
             }
         }
 
-        function handlePeersList(peers) {
-            peers.forEach(peer => {
-                if (!connections.has(peer.peerId)) {
-                    connectToPeer(peer.peerId, peer.uuid);
+        // UI Functions
+        function displayVideo(uuid, stream) {
+            const existingContainer = document.getElementById(`video-${uuid}`);
+            if (existingContainer) {
+                const video = existingContainer.querySelector('video');
+                if (video.srcObject !== stream) {
+                    video.srcObject = stream;
                 }
-            });
-            updatePeerCount();
-        }
-
-        function handlePeerJoined(peerId, uuid) {
-            if (!connections.has(peerId)) {
-                connectToPeer(peerId, uuid);
-                updatePeerCount();
-            }
-        }
-
-        function handlePeerLeft(peerId) {
-            if (connections.has(peerId)) {
-                const connection = connections.get(peerId);
-                if (connection.close) {
-                    connection.close();
-                }
-                connections.delete(peerId);
-                removeVideoStream(peerId);
-                updatePeerCount();
-            }
-        }
-
-        function initPeer() {
-            if (peer) {
-                peer.destroy();
+                return;
             }
 
-            peer = new Peer();
-            
-            peer.on('open', id => {
-                console.log('PeerJS connected:', id);
-                updateConnectionInfo('PeerJS: Connected');
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({
-                        type: 'register',
-                        peerId: id,
-                        uuid: myUUID
-                    }));
-                }
-            });
-
-            peer.on('call', call => {
-                if (myStream) {
-                    call.answer(myStream);
-                    handleCall(call, call.peer);
-                }
-            });
-
-            peer.on('error', error => {
-                console.error('Peer error:', error);
-                updateConnectionInfo('PeerJS: Error');
-            });
-
-            peer.on('disconnected', () => {
-                updateConnectionInfo('PeerJS: Disconnected');
-                setTimeout(() => peer.reconnect(), 5000);
-            });
-        }
-
-        function connectToPeer(peerId, uuid) {
-            if (myStream && !connections.has(peerId)) {
-                console.log('Calling peer:', peerId);
-                const call = peer.call(peerId, myStream);
-                handleCall(call, peerId, uuid);
-            }
-        }
-
-        function handleCall(call, peerId, uuid) {
-            call.on('stream', remoteStream => {
-                console.log('Received stream from:', peerId);
-                addVideoStream(remoteStream, peerId, uuid || 'Unknown');
-                statusElement.textContent = 'Connected to meeting';
-            });
-
-            call.on('close', () => {
-                removeVideoStream(peerId);
-                connections.delete(peerId);
-                updatePeerCount();
-            });
-
-            connections.set(peerId, call);
-        }
-
-        function updatePeerCount() {
-            const count = connections.size + 1; // +1 for self
-            let peerList = `Connected Peers: ${count}<br>- ${myUUID} (You)`;
-            connections.forEach((_, peerId) => {
-                peerList += `<br>- ${peerId}`;
-            });
-            peerStats.innerHTML = peerList;
-        }
-
-        function addVideoStream(stream, peerId, uuid) {
-            removeVideoStream(peerId);
-            
             const container = document.createElement('div');
+            container.id = `video-${uuid}`;
             container.className = 'videoContainer';
-            
+
             const video = document.createElement('video');
             video.srcObject = stream;
-            video.id = `video-${peerId}`;
-            video.setAttribute('playsinline', true);
-            video.setAttribute('autoplay', true);
-            video.setAttribute('muted', peerId === 'local');
-            
-            const peerLabel = document.createElement('div');
-            peerLabel.className = 'peerId';
-            peerLabel.textContent = peerId === 'local' ? `${myUUID} (You)` : uuid;
-            
-            const mediaControls = document.createElement('div');
-            mediaControls.className = 'mediaControls';
-            
-            const audioButton = document.createElement('button');
-            audioButton.className = 'mediaButton';
-            audioButton.innerHTML = '🎤';
-            audioButton.onclick = () => toggleAudio(peerId);
-            
-            const videoButton = document.createElement('button');
-            videoButton.className = 'mediaButton';
-            videoButton.innerHTML = '📹';
-            videoButton.onclick = () => toggleVideo(peerId);
-            
-            mediaControls.appendChild(audioButton);
-            mediaControls.appendChild(videoButton);
-            
+            video.autoplay = true;
+            video.playsInline = true;
+            if (uuid === myUuid) video.muted = true;
+
+            const label = document.createElement('div');
+            label.className = 'peerId';
+            label.textContent = uuid === myUuid ? `${uuid} (You)` : uuid;
+
             container.appendChild(video);
-            container.appendChild(peerLabel);
-            if (peerId === 'local') {
-                container.appendChild(mediaControls);
+            container.appendChild(label);
+            document.getElementById('videoGrid').appendChild(container);
+        }
+
+        function updateStatus(text) {
+            document.getElementById('status').textContent = text;
+        }
+
+        // Main initialization
+        async function initialize() {
+            try {
+                // Generate UUID
+                myUuid = 'user-' + Math.random().toString(36).substr(2, 9);
+                updateStatus('Accessing camera...');
+
+                // Get user media
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    video: true,
+                    audio: true
+                });
+                displayVideo(myUuid, localStream);
+
+                // Start polling loop
+                updateStatus('Connected');
+                pollLoop();
+
+            } catch (error) {
+                console.error('Initialization error:', error);
+                updateStatus('Error: ' + error.message);
+            }
+        }
+
+        async function pollLoop() {
+            try {
+                // Register and get peer list
+                const activePeers = await registerPeer();
+                
+                // Initiate connections to new peers
+                activePeers.forEach(async (peerUuid) => {
+                    if (!peers.has(peerUuid)) {
+                        const pc = createPeerConnection(peerUuid);
+                        const offer = await pc.createOffer();
+                        await pc.setLocalDescription(offer);
+                        await sendMessage(peerUuid, 'offer', offer);
+                    }
+                });
+
+                // Check for messages
+                const messages = await pollMessages();
+                for (const message of messages) {
+                    await handleMessage(message);
+                }
+
+            } catch (error) {
+                console.error('Polling error:', error);
+                updateStatus('Connection error - retrying...');
+            }
+
+            // Continue polling
+            setTimeout(pollLoop, POLL_INTERVAL);
+        }
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', async () => {
+            if (myUuid) {
+                try {
+                    await fetch(`${API_BASE}/peers/${myUuid}`, { method: 'DELETE' });
+                } catch (error) {
+                    console.error('Cleanup error:', error);
+                }
             }
             
-            videoGrid.appendChild(container);
-            video.play().catch(console.error);
-        }
-
-        function removeVideoStream(peerId) {
-            const container = document.getElementById(`video-${peerId}`)?.parentElement;
-            if (container) {
-                const video = container.querySelector('video');
-                if (video && video.srcObject) {
-                    video.srcObject.getTracks().forEach(track => track.stop());
-                }
-                container.remove();
-            }
-        }
-
-        function toggleAudio(peerId) {
-            if (peerId === 'local' && myStream) {
-                const audioTrack = myStream.getAudioTracks()[0];
-                if (audioTrack) {
-                    audioTrack.enabled = !audioTrack.enabled;
-                    mediaState.audio = audioTrack.enabled;
-                    updateMediaButton('audio', audioTrack.enabled);
-                }
-            }
-        }
-
-        function toggleVideo(peerId) {
-            if (peerId === 'local' && myStream) {
-                const videoTrack = myStream.getVideoTracks()[0];
-                if (videoTrack) {
-                    videoTrack.enabled = !videoTrack.enabled;
-                    mediaState.video = videoTrack.enabled;
-                    updateMediaButton('video', videoTrack.enabled);
-                }
-            }
-        }
-
-        function updateMediaButton(type, enabled) {
-            const button = document.querySelector(`.mediaButton:${type === 'audio' ? 'first-child' : 'last-child'}`);
-            if (button) {
-                button.classList.toggle('muted', !enabled);
-            }
-        }
-
-        joinButton.addEventListener('click', async () => {
-            try {
-                joinButton.disabled = true;
-                statusElement.textContent = 'Accessing camera...';
-                
-                myStream = await navigator.mediaDevices.getUserMedia({ 
-                    video: true, 
-                    audio: true 
-                });
-                
-                addVideoStream(myStream, 'local', myUUID);
-                joinButton.style.display = 'none';
-                leaveButton.style.display = 'inline-block';
-                
-                statusElement.textContent = 'Connecting to meeting...';
-                updatePeerCount();
-                
-                initPeer();
-                connectToSignalingServer();
-                
-            } catch (error) {
-                console.error('Media error:', error);
-                statusElement.textContent = 'Could not access camera/microphone';
-                joinButton.disabled = false;
+            peers.forEach(pc => pc.close());
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
             }
         });
 
-        leaveButton.addEventListener('click', cleanup);
-
-        function cleanup() {
-            if (myStream) {
-                myStream.getTracks().forEach(track => track.stop());
-                myStream = null;
-            }
-
-            connections.forEach(connection => {
-                if (connection.close) connection.close();
-            });
-            connections.clear();
-
-            if (ws) {
-                ws.close();
-            }
-
-            if (peer) {
-                peer.destroy();
-            }
-
-            videoGrid.innerHTML = '';
-            joinButton.style.display = 'inline-block';
-            joinButton.disabled = false;
-            leaveButton.style.display = 'none';
-            statusElement.textContent = 'Left meeting';
-            connectionInfo.textContent = '';
-            
-            myUUID = generateUUID();
-            updatePeerCount();
-        }
-
-        window.addEventListener('beforeunload', cleanup);
+        // Start the application
+        initialize();
     </script>
 </body>
 </html>
