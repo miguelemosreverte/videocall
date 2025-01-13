@@ -2,52 +2,118 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Simple Video Call</title>
+  <title>Simple Video Call with Avatars</title>
   <style>
     body {
-      font-family: sans-serif;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
       margin: 0;
-      padding: 20px;
-      background: #f0f0f0;
+      padding: 0;
+      background: #e5e5e5;
+      color: #333;
     }
-    #loginForm, #videoGrid {
+    header {
       display: flex;
-      flex-direction: column;
       align-items: center;
-      margin-top: 50px;
+      justify-content: center;
+      background: #4CAF50;
+      color: white;
+      padding: 20px;
+      font-size: 24px;
+      font-weight: bold;
+    }
+    #mainContainer {
+      max-width: 900px;
+      margin: 20px auto;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      padding: 20px;
+      min-height: 80vh;
+    }
+    .hidden {
+      display: none;
+    }
+    #userSelection {
+      display: flex;
+      flex-direction: row;
+      justify-content: space-around;
+      margin-bottom: 30px;
+    }
+    .avatarOption {
+      text-align: center;
+      cursor: pointer;
+      transition: transform 0.2s ease;
+    }
+    .avatarOption:hover {
+      transform: scale(1.05);
+    }
+    .avatarImage {
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      object-fit: cover;
+      margin-bottom: 10px;
+      border: 3px solid transparent;
+    }
+    .avatarName {
+      font-weight: bold;
+      font-size: 16px;
+    }
+    .avatarSelected {
+      border-color: #4CAF50 !important;
+    }
+    #joinButton {
+      background: #4CAF50;
+      color: white;
+      border: none;
+      padding: 12px 20px;
+      font-size: 18px;
+      border-radius: 6px;
+      cursor: pointer;
+      margin: 20px auto;
+      display: block;
+    }
+    #joinButton:hover {
+      background: #45a049;
+    }
+    #errorMessage {
+      color: red;
+      font-weight: bold;
+      text-align: center;
+      margin: 10px 0;
     }
     #videoGrid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, 300px);
-      gap: 10px;
-      padding: 20px;
-      width: 100%;
-      max-width: 1200px;
-      margin: 0 auto;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 20px;
+      margin-top: 20px;
     }
     .videoContainer {
       position: relative;
-      width: 300px;
-      height: 300px;
       background: #000;
-      border-radius: 8px;
+      border-radius: 6px;
       overflow: hidden;
+      width: 100%;
+      padding-bottom: 56.25%;
+      /* 16:9 ratio – or you can fix height to 300px if you prefer */
     }
-    video {
+    .videoContainer video {
+      position: absolute;
+      top: 0;
+      left: 0;
       width: 100%;
       height: 100%;
       object-fit: cover;
-      background: #000;
     }
     .peerId {
       position: absolute;
       bottom: 10px;
       left: 10px;
-      background: rgba(0,0,0,0.7);
+      background: rgba(0,0,0,0.6);
       color: white;
       padding: 5px 10px;
       border-radius: 4px;
-      font-size: 12px;
+      font-size: 14px;
     }
     #status {
       position: fixed;
@@ -73,54 +139,58 @@
       font-size: 12px;
       z-index: 1000;
     }
-    button {
-      padding: 10px 20px;
-      font-size: 16px;
-      background: #4CAF50;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      margin: 10px;
-    }
-    button:hover {
-      background: #45a049;
-    }
-    button:disabled {
-      background: #ccc;
-      cursor: not-allowed;
-    }
   </style>
 </head>
 <body>
-  <div id="loginForm">
-    <button id="joinButton">Join Call</button>
+  <header>WebRTC Video Call (Choose Your Avatar)</header>
+
+  <div id="mainContainer">
+    <!-- Step 1: Choose user/avatar -->
+    <div id="userSelection" class="hidden"></div>
+
+    <div id="errorMessage"></div>
+
+    <!-- Step 2: Join button -->
+    <button id="joinButton" class="hidden">Join Call</button>
+
+    <!-- Step 3: Videos -->
+    <div id="videoGrid"></div>
   </div>
 
-  <div id="videoGrid"></div>
+  <!-- Status + debug overlays -->
   <div id="status">Ready</div>
   <div id="debugInfo"></div>
 
   <script>
-    // ==============================
-    // UPDATE THIS to your server
-    // ==============================
+    // ================================
+    // Adjust to match your server
+    // ================================
     const SIGNALING_SERVER = 'https://193.124.115.137:3000';
-    const POLL_INTERVAL = 2000; // 2 seconds
+
+    // We'll do "smart" poll intervals
+    let currentPollInterval = 2000;  // start at 2s
+    const minPollInterval = 2000;    // 2s
+    const maxPollInterval = 10000;   // 10s
+    let lastPeerCount = 0;
 
     // DOM
-    const videoGrid = document.getElementById('videoGrid');
+    const userSelectionDiv = document.getElementById('userSelection');
     const joinButton = document.getElementById('joinButton');
+    const errorMessage = document.getElementById('errorMessage');
+    const videoGrid = document.getElementById('videoGrid');
     const statusDiv = document.getElementById('status');
     const debugInfo = document.getElementById('debugInfo');
 
-    // State
+    // We'll store the chosen "username" as myUuid
     let myUuid = null;
     let localStream = null;
     let isPolling = false;
-    const peers = new Map(); // peerUuid -> { pc, iceCandidates: [], hasRemoteDescription: false }
+    const peers = new Map(); // Map peerUuid -> { pc, iceCandidates: [], hasRemoteDescription: false }
 
-    // Logger
+    // For the "smart poll" logic
+    let hasChanges = false;
+
+    // Simple logger
     function log(message, data = null) {
       const time = new Date().toLocaleTimeString();
       const text = data
@@ -130,51 +200,194 @@
       debugInfo.innerHTML = text + '<br>' + debugInfo.innerHTML;
     }
 
-    // ICE servers
+    // ICE config
     const iceServers = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' }
-        // Add TURN if needed
       ]
     };
 
-    // -------------------------------
-    // Server API
-    // -------------------------------
-    async function registerPeer() {
-      // POST /peers
+    // -----------
+    // On startup, load users.json so we can show them
+    // -----------
+    window.addEventListener('load', async () => {
       try {
-        const response = await fetch(`${SIGNALING_SERVER}/peers`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ uuid: myUuid })
-        });
-        const data = await response.json();
-        log('Registered with server (once)', data);
-        return data;
+        const resp = await fetch('users.json');  // must be in same folder
+        if (!resp.ok) {
+          throw new Error(`Failed to load users.json: ${resp.status}`);
+        }
+        const users = await resp.json();
+        showUserSelection(users);
       } catch (error) {
-        log('Registration error', error.message);
-        throw error;
+        console.error('Could not load users.json:', error);
       }
+    });
+
+    function showUserSelection(users) {
+      userSelectionDiv.classList.remove('hidden');
+
+      users.forEach((u, index) => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'avatarOption';
+
+        const img = document.createElement('img');
+        img.src = u.avatar;
+        img.alt = u.name;
+        img.className = 'avatarImage';
+        img.id = `avatar-${u.name}`;
+
+        // When user clicks on an avatar
+        img.onclick = () => {
+          // Clear all border highlights
+          document.querySelectorAll('.avatarImage').forEach(elem => {
+            elem.classList.remove('avatarSelected');
+          });
+          // Highlight the chosen one
+          img.classList.add('avatarSelected');
+
+          // Set global myUuid
+          myUuid = u.name;
+          errorMessage.textContent = '';
+          joinButton.classList.remove('hidden');
+        };
+
+        const label = document.createElement('div');
+        label.className = 'avatarName';
+        label.textContent = u.name;
+
+        wrapper.appendChild(img);
+        wrapper.appendChild(label);
+        userSelectionDiv.appendChild(wrapper);
+      });
+    }
+
+    // -----------
+    // Join button logic
+    // -----------
+    joinButton.onclick = async () => {
+      if (!myUuid) {
+        errorMessage.textContent = 'Please select a user/avatar first!';
+        return;
+      }
+      joinButton.disabled = true;
+      errorMessage.textContent = '';
+
+      updateStatus(`Accessing camera for user "${myUuid}"...`);
+      log('Starting session', myUuid);
+
+      try {
+        // 1) Get local stream
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        log('Got local stream', {
+          tracks: localStream.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled }))
+        });
+        displayVideo(myUuid, localStream);
+
+        // 2) Register the user
+        //    If 409 => the user is taken
+        await registerPeer(myUuid);
+
+        // 3) Start polling
+        isPolling = true;
+        pollLoop();
+
+        updateStatus(`Connected as "${myUuid}"`);
+        joinButton.style.display = 'none';
+        userSelectionDiv.classList.add('hidden');
+      } catch (error) {
+        joinButton.disabled = false;
+        log('Setup error', error.message);
+        errorMessage.textContent = error.message;
+      }
+    };
+
+    async function registerPeer(uuid) {
+      // POST /peers
+      const resp = await fetch(`${SIGNALING_SERVER}/peers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uuid })
+      });
+      if (resp.status === 409) {
+        throw new Error(`User "${uuid}" is already taken!`);
+      }
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(`Registration failed: ${resp.status} ${resp.statusText} - ${text}`);
+      }
+      const data = await resp.json();
+      log('Registered with server (once)', data);
+      return data;
+    }
+
+    // -----------
+    // Poll loop: uses dynamic intervals
+    // -----------
+    async function pollLoop() {
+      if (!isPolling) return;
+
+      try {
+        // 1) Get active peers
+        const activePeers = await getActivePeers();
+        // If peer count changed => we have changes
+        if (activePeers.length !== lastPeerCount) {
+          hasChanges = true;
+          lastPeerCount = activePeers.length;
+        }
+
+        // Create offers to bigger IDs if needed
+        for (const peerUuid of activePeers) {
+          if (peerUuid === myUuid) continue;
+          // Only offer if myUuid < peerUuid
+          if (myUuid < peerUuid) {
+            if (!peers.has(peerUuid)) {
+              const pc = createPeerConnection(peerUuid);
+              log('Creating offer', peerUuid);
+              const offer = await pc.createOffer();
+              await pc.setLocalDescription(offer);
+              await sendToPeer(peerUuid, 'offer', offer);
+              hasChanges = true;
+            }
+          }
+        }
+
+        // 2) Poll messages
+        const messages = await pollMessages();
+        if (messages.length > 0) {
+          hasChanges = true;
+        }
+        for (const msg of messages) {
+          await handleMessage(msg);
+        }
+
+      } catch (error) {
+        log('Polling error', error.message);
+        updateStatus('Connection error - retrying...');
+      }
+
+      // Decide next poll interval
+      let nextInterval;
+      if (hasChanges) {
+        nextInterval = minPollInterval; // 2s
+        hasChanges = false; // reset flag
+      } else {
+        nextInterval = maxPollInterval; // 10s
+      }
+
+      setTimeout(pollLoop, nextInterval);
     }
 
     async function getActivePeers() {
-      // GET /peers
       try {
         const url = `${SIGNALING_SERVER}/peers`;
         const response = await fetch(url);
-
         if (!response.ok) {
           const text = await response.text();
-          log(`getActivePeers() failed - ${response.status} ${response.statusText}`, {
-            url,
-            body: text
-          });
+          log(`getActivePeers() failed - ${response.status} ${response.statusText}`, { url, body: text });
           throw new Error(`Fetch failed: ${response.status} ${response.statusText}`);
         }
-
         const data = await response.json();
         log('Fetched peer list', data);
         return data.peers || [];
@@ -185,10 +398,15 @@
     }
 
     async function pollMessages() {
-      // GET /peers/:uuid/messages
       try {
-        const response = await fetch(`${SIGNALING_SERVER}/peers/${myUuid}/messages`);
-        const data = await response.json();
+        const url = `${SIGNALING_SERVER}/peers/${myUuid}/messages`;
+        const resp = await fetch(url);
+        if (!resp.ok) {
+          const text = await resp.text();
+          log(`pollMessages() failed - ${resp.status} ${resp.statusText}`, { url, body: text });
+          throw new Error(`Poll failed: ${resp.status}`);
+        }
+        const data = await resp.json();
         if (data.messages.length > 0) {
           log('Received messages', { count: data.messages.length });
         }
@@ -200,13 +418,18 @@
     }
 
     async function sendToPeer(targetUuid, type, data) {
-      // POST /peers/:uuid/messages
       try {
-        await fetch(`${SIGNALING_SERVER}/peers/${targetUuid}/messages`, {
+        const url = `${SIGNALING_SERVER}/peers/${targetUuid}/messages`;
+        const resp = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type, data, from: myUuid })
         });
+        if (!resp.ok) {
+          const text = await resp.text();
+          log(`sendToPeer() failed - ${resp.status} ${resp.statusText}`, { url, body: text });
+          throw new Error(`Send failed: ${resp.status}`);
+        }
         log('Sent message', { to: targetUuid, type });
       } catch (error) {
         log('Send error', error.message);
@@ -214,17 +437,15 @@
       }
     }
 
-    // -------------------------------
+    // ----------------------
     // WebRTC
-    // -------------------------------
+    // ----------------------
     function createPeerConnection(targetUuid) {
       if (peers.has(targetUuid)) {
         return peers.get(targetUuid).pc;
       }
-
       log('Creating peer connection', targetUuid);
       const pc = new RTCPeerConnection(iceServers);
-
       const peerInfo = {
         pc,
         iceCandidates: [],
@@ -236,29 +457,25 @@
         log('Connection state', { targetUuid, state: pc.connectionState });
         updateStatus(`Peer ${targetUuid}: ${pc.connectionState}`);
       };
-
       pc.oniceconnectionstatechange = () => {
         log('ICE state', { targetUuid, state: pc.iceConnectionState });
       };
-
       pc.onicegatheringstatechange = () => {
         log('ICE gathering state', { targetUuid, state: pc.iceGatheringState });
       };
-
       pc.onicecandidate = (event) => {
         if (event.candidate) {
           log('Generated ICE candidate', { targetUuid, type: event.candidate.type });
           sendToPeer(targetUuid, 'ice-candidate', event.candidate);
         }
       };
-
-      pc.ontrack = (event) => {
+      pc.ontrack = (evt) => {
         log('Received track', {
           targetUuid,
-          kind: event.track.kind,
-          readyState: event.track.readyState
+          kind: evt.track.kind,
+          readyState: evt.track.readyState
         });
-        displayVideo(targetUuid, event.streams[0]);
+        displayVideo(targetUuid, evt.streams[0]);
       };
 
       // Add local tracks
@@ -276,8 +493,8 @@
       return pc;
     }
 
-    async function handleMessage(message) {
-      const { type, data, from } = message;
+    async function handleMessage(msg) {
+      const { type, data, from } = msg;
       log('Handling message', { type, from });
 
       try {
@@ -288,7 +505,7 @@
             await pc.setRemoteDescription(new RTCSessionDescription(data));
             peers.get(from).hasRemoteDescription = true;
 
-            // Add any queued ICE
+            // Add queued ICE
             const peerInfo = peers.get(from);
             while (peerInfo.iceCandidates.length) {
               const candidate = peerInfo.iceCandidates.shift();
@@ -305,12 +522,12 @@
           }
           case 'answer': {
             const peerInfo = peers.get(from);
-            if (!peerInfo || !peerInfo.pc) return;
+            if (!peerInfo?.pc) return;
             log('Setting remote description (answer)', from);
             await peerInfo.pc.setRemoteDescription(new RTCSessionDescription(data));
             peerInfo.hasRemoteDescription = true;
 
-            // Add any queued ICE
+            // Add queued ICE
             while (peerInfo.iceCandidates.length) {
               const candidate = peerInfo.iceCandidates.shift();
               await peerInfo.pc.addIceCandidate(candidate);
@@ -320,7 +537,7 @@
           }
           case 'ice-candidate': {
             const peerInfo = peers.get(from);
-            if (!peerInfo || !peerInfo.pc) return;
+            if (!peerInfo?.pc) return;
             const candidate = new RTCIceCandidate(data);
 
             if (!peerInfo.hasRemoteDescription) {
@@ -333,148 +550,65 @@
             break;
           }
         }
-      } catch (error) {
-        log('Error handling message', { type, from, error: error.message });
+      } catch (err) {
+        log('Error handling message', { type, from, error: err.message });
       }
     }
 
+    // Display local/remote video
     function displayVideo(uuid, stream) {
       let container = document.getElementById(`video-${uuid}`);
       if (!container) {
         container = document.createElement('div');
-        container.id = `video-${uuid}`;
         container.className = 'videoContainer';
+        container.id = `video-${uuid}`;
 
-        const video = document.createElement('video');
-        video.autoplay = true;
-        video.playsInline = true;
-
-        video.onloadedmetadata = () => {
-          log('Video metadata loaded', uuid);
-          video.play().catch(e => log('Video play error', e.message));
-        };
-
-        // Mute self
+        const vid = document.createElement('video');
+        vid.autoplay = true;
+        vid.playsInline = true;
         if (uuid === myUuid) {
-          video.muted = true;
+          vid.muted = true;
         }
+
+        vid.onloadedmetadata = () => {
+          log('Video metadata loaded', uuid);
+          vid.play().catch(e => log('Video play error', e.message));
+        };
 
         const label = document.createElement('div');
         label.className = 'peerId';
         label.textContent = (uuid === myUuid) ? `${uuid} (You)` : uuid;
 
-        container.appendChild(video);
+        container.appendChild(vid);
         container.appendChild(label);
         videoGrid.appendChild(container);
       }
-
-      const video = container.querySelector('video');
-      if (video.srcObject !== stream) {
+      const videoElem = container.querySelector('video');
+      if (videoElem.srcObject !== stream) {
         log('Setting video stream', { uuid, tracks: stream.getTracks().length });
-        video.srcObject = stream;
+        videoElem.srcObject = stream;
       }
-    }
-
-    // -------------------------------
-    // Poll loop
-    // -------------------------------
-    async function pollLoop() {
-      if (!isPolling) return;
-
-      try {
-        // 1) Get the full list of peers
-        const activePeers = await getActivePeers();
-
-        // 2) Create offers to peers with bigger IDs
-        for (const peerUuid of activePeers) {
-          if (peerUuid === myUuid) continue;
-          // Only offer if myUuid < peerUuid (avoid double-offer)
-          if (myUuid < peerUuid) {
-            if (!peers.has(peerUuid)) {
-              const pc = createPeerConnection(peerUuid);
-              log('Creating offer', peerUuid);
-              const offer = await pc.createOffer();
-              await pc.setLocalDescription(offer);
-              await sendToPeer(peerUuid, 'offer', offer);
-            }
-          }
-        }
-
-        // 3) Poll for messages
-        const messages = await pollMessages();
-        for (const msg of messages) {
-          await handleMessage(msg);
-        }
-
-      } catch (error) {
-        log('Polling error', error.message);
-        updateStatus('Connection error - retrying...');
-      }
-
-      setTimeout(pollLoop, POLL_INTERVAL);
     }
 
     function updateStatus(text) {
       statusDiv.textContent = text;
     }
 
-    // -------------------------------
-    // Join button
-    // -------------------------------
-    joinButton.onclick = async () => {
-      try {
-        joinButton.disabled = true;
-        myUuid = 'user-' + Math.random().toString(36).substr(2, 9);
-
-        updateStatus('Accessing camera...');
-        log('Starting session', myUuid);
-
-        // 1) Local stream
-        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        log('Got local stream', {
-          tracks: localStream.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled }))
-        });
-        displayVideo(myUuid, localStream);
-
-        // 2) Register peer once
-        await registerPeer();
-
-        // 3) Start the poll loop
-        isPolling = true;
-        pollLoop();
-
-        updateStatus('Connected to call');
-        joinButton.style.display = 'none';
-
-      } catch (error) {
-        log('Setup error', error.message);
-        updateStatus('Error: ' + error.message);
-        joinButton.disabled = false;
-      }
-    };
-
-    // -------------------------------
-    // Cleanup on page unload
-    // -------------------------------
+    // Cleanup on unload
     window.addEventListener('beforeunload', async () => {
       isPolling = false;
-
       if (myUuid) {
         try {
           // DELETE /peers/:uuid
           await fetch(`${SIGNALING_SERVER}/peers/${myUuid}`, { method: 'DELETE' });
-          log('Cleanup successful');
-        } catch (error) {
-          log('Cleanup error', error.message);
+          log(`User ${myUuid} disconnected`);
+        } catch (err) {
+          log('Cleanup error', err.message);
         }
       }
-
       peers.forEach(peer => {
-        if (peer.pc) {
-          peer.pc.close();
-        }
+        if (peer.pc) peer.pc.close();
       });
-
       if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
       }
