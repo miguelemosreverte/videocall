@@ -49,6 +49,13 @@
         #joinButton:hover {
             background-color: #45a049;
         }
+        #participantsList {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: white;
+            border-radius: 5px;
+            min-width: 200px;
+        }
     </style>
 </head>
 <body>
@@ -56,76 +63,160 @@
     <button id="joinButton">Join Meeting</button>
     <div id="videoGrid"></div>
     <div id="status">Click 'Join Meeting' to start</div>
+    <div id="participantsList">Participants: 0</div>
 
     <script>
         const videoGrid = document.getElementById('videoGrid');
         const statusElement = document.getElementById('status');
         const joinButton = document.getElementById('joinButton');
+        const participantsList = document.getElementById('participantsList');
+        
+        // Store connected peers
+        const connectedPeers = new Set();
+        let myPeerId = null;
+        let myStream = null;
+        
+        // Initialize PeerJS with random ID
         const peer = new Peer();
-        const globalRoomId = 'global-meeting-room';
-        let myStream;
 
         joinButton.addEventListener('click', () => {
             joinButton.disabled = true;
             statusElement.textContent = 'Requesting camera and microphone access...';
-            joinGlobalMeeting();
+            joinMeeting();
         });
 
         peer.on('open', (id) => {
+            myPeerId = id;
             console.log('My peer ID is: ' + id);
             statusElement.textContent = 'Connected to PeerJS. Click "Join Meeting" to start.';
         });
 
-        function joinGlobalMeeting() {
-            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-                navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-                    .then(stream => {
-                        myStream = stream;
-                        addVideoStream(stream, peer.id);
-                        statusElement.textContent = 'Joined global meeting';
-                        
-                        peer.on('call', call => {
-                            call.answer(stream);
-                            call.on('stream', userVideoStream => {
-                                addVideoStream(userVideoStream, call.peer);
-                            });
-                        });
-                        
-                        connectToNewUser(globalRoomId, stream);
-                    })
-                    .catch(error => {
-                        console.error("Error accessing media devices:", error);
-                        statusElement.textContent = 'Error: Unable to access camera/microphone';
-                        joinButton.disabled = false;
-                    });
-            } else {
-                statusElement.textContent = 'Error: getUserMedia is not supported in this browser';
-                joinButton.disabled = false;
-            }
+        function updateParticipantCount() {
+            participantsList.textContent = `Participants: ${connectedPeers.size + 1}`; // +1 for self
         }
 
-        function connectToNewUser(userId, stream) {
-            const call = peer.call(userId, stream);
-            call.on('stream', userVideoStream => {
-                addVideoStream(userVideoStream, call.peer);
+        function joinMeeting() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                statusElement.textContent = 'Error: getUserMedia is not supported in this browser';
+                joinButton.disabled = false;
+                return;
+            }
+
+            navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+                .then(stream => {
+                    myStream = stream;
+                    addVideoStream(stream, 'my-video');
+                    statusElement.textContent = 'Connected to meeting';
+                    
+                    // Handle incoming calls
+                    peer.on('call', handleIncomingCall);
+                    
+                    // Connect to all existing peers
+                    broadcastToPeers();
+                    
+                    // Update participant count
+                    updateParticipantCount();
+                })
+                .catch(error => {
+                    console.error("Error accessing media devices:", error);
+                    statusElement.textContent = 'Error: Unable to access camera/microphone';
+                    joinButton.disabled = false;
+                });
+        }
+
+        function handleIncomingCall(call) {
+            call.answer(myStream);
+            
+            call.on('stream', (remoteStream) => {
+                if (!connectedPeers.has(call.peer)) {
+                    connectedPeers.add(call.peer);
+                    addVideoStream(remoteStream, call.peer);
+                    updateParticipantCount();
+                    
+                    // Broadcast to other peers that we're here
+                    broadcastToPeers();
+                }
             });
+            
+            call.on('close', () => {
+                removeVideoStream(call.peer);
+                connectedPeers.delete(call.peer);
+                updateParticipantCount();
+            });
+        }
+
+        function broadcastToPeers() {
+            // Get list of all peers from the server
+            peer.listAllPeers(peers => {
+                peers.forEach(peerId => {
+                    // Don't connect to ourselves or already connected peers
+                    if (peerId !== myPeerId && !connectedPeers.has(peerId)) {
+                        connectToPeer(peerId);
+                    }
+                });
+            });
+        }
+
+        function connectToPeer(peerId) {
+            if (myStream) {
+                const call = peer.call(peerId, myStream);
+                
+                call.on('stream', (remoteStream) => {
+                    if (!connectedPeers.has(peerId)) {
+                        connectedPeers.add(peerId);
+                        addVideoStream(remoteStream, peerId);
+                        updateParticipantCount();
+                    }
+                });
+                
+                call.on('close', () => {
+                    removeVideoStream(peerId);
+                    connectedPeers.delete(peerId);
+                    updateParticipantCount();
+                });
+            }
         }
 
         function addVideoStream(stream, peerId) {
             const video = document.createElement('video');
             video.srcObject = stream;
+            video.setAttribute('id', `video-${peerId}`);
             video.addEventListener('loadedmetadata', () => {
                 video.play();
             });
-            video.setAttribute('id', peerId);
             videoGrid.append(video);
+        }
+
+        function removeVideoStream(peerId) {
+            const video = document.getElementById(`video-${peerId}`);
+            if (video) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+                video.remove();
+            }
         }
 
         peer.on('error', (error) => {
             console.error('PeerJS error:', error);
             statusElement.textContent = 'Error: ' + error.type;
+            
+            // If the peer is unavailable, remove them from our connections
+            if (error.type === 'peer-unavailable') {
+                const peerId = error.message.split(' ')[1];
+                removeVideoStream(peerId);
+                connectedPeers.delete(peerId);
+                updateParticipantCount();
+            }
+            
             joinButton.disabled = false;
         });
+
+        // Clean up when the user leaves
+        window.onbeforeunload = () => {
+            if (myStream) {
+                myStream.getTracks().forEach(track => track.stop());
+            }
+            peer.destroy();
+        };
     </script>
 </body>
 </html>
