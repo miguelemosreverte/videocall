@@ -698,8 +698,6 @@
     const peerRegistrationTimes = new Map(); // Track when each peer registered
     const connectionAttempts = new Map(); // Track connection attempts
     const connectionCooldown = new Map(); // Prevent rapid reconnection
-    let isPolling = false;
-    let lastKnownPeers = [];
     const processedMessages = new Set();
     const iceCandidateQueue = new Map(); // Buffer ICE candidates
 
@@ -716,59 +714,19 @@
       const loader = new ProgressiveImageLoader();
       await loader.loadBackgroundImage();
       
-      // Load user selection
-      try {
-        const activePeers = await fetchActivePeers();
-        showUserSelection(users, activePeers);
-      } catch (error) {
-        console.log('Starting in offline mode');
-        showUserSelection(users, []);
-      }
+      // Load user selection - no need to check active peers anymore
+      showUserSelection(users);
     });
 
-    async function fetchActivePeers() {
-      try {
-        const resp = await fetch(SIGNALING_SERVER + '/latest', {
-          method: 'GET',
-          mode: 'cors',
-          headers: {
-            'X-Master-Key': JSONBIN_API_KEY
-          }
-        });
-        if (!resp.ok) {
-          throw new Error(`Failed to fetch: ${resp.status}`);
-        }
-        const data = await resp.json();
-        const record = data.record || {};
-        const now = Date.now();
-        const activePeers = [];
-        // Only log peers if there's a change
-        const peerCount = Object.keys(record.peers || {}).length;
-        if (peerCount > 0) {
-          for (const [peer, timestamp] of Object.entries(record.peers || {})) {
-            if (now - timestamp < 30000) {
-              activePeers.push(peer);
-            }
-          }
-        }
-        return activePeers;
-      } catch (error) {
-        console.log('Using local-only mode:', error.message);
-        return [];
-      }
-    }
-
-    function showUserSelection(allUsers, takenList) {
+    // Removed fetchActivePeers - no longer polling server
+    
+    function showUserSelection(allUsers) {
       const userSelectionDiv = document.getElementById('userSelection');
       userSelectionDiv.innerHTML = '';
 
       allUsers.forEach(u => {
         const wrapper = document.createElement('div');
         wrapper.className = 'avatar-option';
-        
-        if (takenList.includes(u.name)) {
-          wrapper.classList.add('disabled');
-        }
 
         const img = document.createElement('img');
         img.src = u.avatar;
@@ -826,9 +784,6 @@
         // Add local video
         createVideoContainer(myUuid, localStream, true);
 
-        // Start polling for peers
-        isPolling = true;
-        
         // Connect to existing peers in the room - JUST OFFER TO EVERYONE!
         if (registration.existingPeers && registration.existingPeers.length > 0) {
           console.log('Found existing peers in room:', registration.existingPeers);
@@ -838,25 +793,7 @@
           }
         }
         
-        pollLoop();
-        
-        // Start heartbeat to keep registration alive
-        setInterval(() => {
-          if (myUuid && isPolling) {
-            registerPeer(myUuid);
-          }
-        }, 20000); // Update every 20 seconds
-        
-        // Ping connected peers periodically
-        setInterval(async () => {
-          if (myUuid && isPolling) {
-            for (const [peerUuid, pc] of peers) {
-              if (pc.connectionState === 'connected') {
-                await sendToPeer(peerUuid, 'ping', { timestamp: Date.now() });
-              }
-            }
-          }
-        }, 120000); // Ping every 2 minutes
+        // No polling needed - data channels handle discovery!
 
       } catch (err) {
         document.getElementById('errorMessage').textContent = 
@@ -904,28 +841,8 @@
         if (wasNewPeer) {
           const existingPeers = Object.keys(record.peers).filter(p => p !== uuid);
           
-          // Send direct peer-entered to each existing peer
-          for (const peer of existingPeers) {
-            record.messages[peer] = record.messages[peer] || [];
-            record.messages[peer].push({
-              type: 'peer-entered',
-              from: uuid,
-              timestamp: now
-            });
-          }
-          
-          // Also send a flood message asking peers to announce themselves
-          for (const peer of existingPeers) {
-            record.messages[peer].push({
-              type: 'announce-peers',
-              from: uuid,
-              ttl: existingPeers.length + 1,
-              origin: uuid,
-              timestamp: now
-            });
-          }
-          
-          console.log('Sending enter event and announce request to existing peers:', existingPeers);
+          // No need to send messages - will connect directly via WebRTC
+          console.log('Found existing peers, will connect directly:', existingPeers);
         }
         
         const updateResp = await fetch(SIGNALING_SERVER, {
@@ -950,86 +867,7 @@
       }
     }
 
-    async function pollLoop() {
-      if (!isPolling) return;
-
-      try {
-        const activePeers = await fetchActivePeers();
-        
-        // Only log if peers changed
-        const peersChanged = JSON.stringify(activePeers.sort()) !== JSON.stringify(lastKnownPeers.sort());
-        if (peersChanged) {
-          console.log('Active peers in room:', activePeers);
-          lastKnownPeers = [...activePeers];
-        }
-        
-        // Create connections for new peers - with cooldown check
-        for (const peerUuid of activePeers) {
-          if (peerUuid === myUuid) continue;
-          
-          // Check if we're in cooldown for this peer
-          const cooldownUntil = connectionCooldown.get(peerUuid);
-          if (cooldownUntil && Date.now() < cooldownUntil) {
-            console.log(`Still in cooldown for ${peerUuid}, skipping...`);
-            continue;
-          }
-          
-          if (!peers.has(peerUuid)) {
-            // Track connection attempts
-            const attempts = connectionAttempts.get(peerUuid) || 0;
-            if (attempts >= 3) {
-              console.log(`Max connection attempts reached for ${peerUuid}, waiting longer...`);
-              connectionCooldown.set(peerUuid, Date.now() + 15000); // 15 second cooldown after 3 failures
-              connectionAttempts.delete(peerUuid);
-              continue;
-            }
-            
-            console.log(`New peer ${peerUuid} detected - creating offer (attempt ${attempts + 1})`);
-            connectionAttempts.set(peerUuid, attempts + 1);
-            await createPeerConnection(peerUuid, true);
-          }
-        }
-
-        // Poll for messages
-        const messages = await pollMessages();
-        for (const msg of messages) {
-          await handleSignalMessage(msg);
-        }
-      } catch (err) {
-        console.error('Polling error:', err);
-      }
-
-      setTimeout(pollLoop, 5000); // Poll every 5 seconds instead of 2
-    }
-
-    async function pollMessages() {
-      try {
-        const resp = await fetch(SIGNALING_SERVER + '/latest', {
-          headers: { 'X-Master-Key': JSONBIN_API_KEY }
-        });
-        if (!resp.ok) {
-          throw new Error(`Poll failed: ${resp.status}`);
-        }
-        const data = await resp.json();
-        const record = data.record || { messages: {} };
-        const myMessages = record.messages?.[myUuid] || [];
-        
-        if (myMessages.length > 0) {
-          record.messages[myUuid] = [];
-          await fetch(SIGNALING_SERVER, {
-            method: 'PUT',
-            headers: {
-              'X-Master-Key': JSONBIN_API_KEY,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(record)
-          });
-        }
-        return myMessages;
-      } catch (error) {
-        return [];
-      }
-    }
+    // Removed polling functions - using data channels for all peer communication
 
     async function sendToPeer(targetUuid, type, data) {
       let retries = 3;
@@ -1141,6 +979,17 @@
           if (message.registrationTime) {
             peerRegistrationTimes.set(fromPeer, message.registrationTime);
           }
+          
+          // If we're the master, broadcast this new peer to everyone
+          if (masterPeer === myUuid) {
+            const allPeers = Array.from(dataChannels.keys());
+            allPeers.push(myUuid);
+            broadcastDataMessage({
+              type: 'peer-list',
+              peers: allPeers,
+              master: myUuid
+            });
+          }
           break;
           
         case 'heartbeat':
@@ -1163,6 +1012,13 @@
           // Master is sharing the authoritative peer list
           if (fromPeer === masterPeer) {
             syncPeerList(message.peers);
+            // Connect to any new peers we don't know about
+            for (const peerUuid of message.peers) {
+              if (peerUuid !== myUuid && !peers.has(peerUuid)) {
+                console.log(`Discovered new peer ${peerUuid} from master, creating connection`);
+                createPeerConnection(peerUuid, true);
+              }
+            }
           }
           break;
           
@@ -2034,7 +1890,6 @@
 
     // Cleanup on exit
     window.addEventListener('beforeunload', async () => {
-      isPolling = false;
       if (myUuid) {
         try {
           const getResp = await fetch(SIGNALING_SERVER + '/latest', {
