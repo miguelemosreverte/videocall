@@ -165,6 +165,15 @@
       height: 100%;
       object-fit: cover;
     }
+    
+    .videoContainer.minimized {
+      position: fixed !important;
+      bottom: 20px;
+      right: 20px;
+      width: 200px !important;
+      height: 150px !important;
+      z-index: 1000;
+    }
 
     .peerId {
       position: absolute;
@@ -176,6 +185,34 @@
       border-radius: 20px;
       font-size: 14px;
       font-weight: 500;
+    }
+    
+    .video-controls {
+      position: absolute;
+      bottom: 15px;
+      right: 15px;
+      display: flex;
+      gap: 10px;
+    }
+    
+    .control-btn {
+      background: rgba(0,0,0,0.7);
+      color: white;
+      border: none;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 18px;
+      transition: background 0.3s;
+    }
+    
+    .control-btn:hover {
+      background: rgba(0,0,0,0.9);
+    }
+    
+    .control-btn.active {
+      background: #dc3545;
     }
   </style>
 </head>
@@ -1073,7 +1110,13 @@
         const video = document.createElement('video');
         video.autoplay = true;
         video.playsInline = true;
-        if (isLocal) video.muted = true;
+        // Only mute local video to prevent echo, remote should have audio
+        if (isLocal) {
+          video.muted = true;
+        } else {
+          video.muted = false;
+          video.volume = 1.0;
+        }
 
         const label = document.createElement('div');
         label.className = 'peerId';
@@ -1083,6 +1126,29 @@
 
         container.appendChild(video);
         container.appendChild(label);
+        
+        // Add controls for local video
+        if (isLocal) {
+          const controls = document.createElement('div');
+          controls.className = 'video-controls';
+          
+          // Mute button
+          const muteBtn = document.createElement('button');
+          muteBtn.className = 'control-btn';
+          muteBtn.innerHTML = '🎤';
+          muteBtn.onclick = () => toggleMute(muteBtn);
+          
+          // Minimize button
+          const minimizeBtn = document.createElement('button');
+          minimizeBtn.className = 'control-btn';
+          minimizeBtn.innerHTML = '⬇';
+          minimizeBtn.onclick = () => toggleMinimize(container, minimizeBtn);
+          
+          controls.appendChild(muteBtn);
+          controls.appendChild(minimizeBtn);
+          container.appendChild(controls);
+        }
+        
         document.getElementById('videoGrid').appendChild(container);
 
         adjustGridLayout();
@@ -1093,19 +1159,52 @@
         video.srcObject = stream;
       }
     }
+    
+    function toggleMute(btn) {
+      if (localStream) {
+        const audioTrack = localStream.getAudioTracks()[0];
+        if (audioTrack) {
+          audioTrack.enabled = !audioTrack.enabled;
+          btn.classList.toggle('active');
+          btn.innerHTML = audioTrack.enabled ? '🎤' : '🔇';
+        }
+      }
+    }
+    
+    function toggleMinimize(container, btn) {
+      container.classList.toggle('minimized');
+      btn.innerHTML = container.classList.contains('minimized') ? '⬆' : '⬇';
+      adjustGridLayout();
+    }
 
     function adjustGridLayout() {
       const grid = document.getElementById('videoGrid');
-      const count = grid.querySelectorAll('.videoContainer').length;
+      // Only count non-minimized containers for grid layout
+      const containers = grid.querySelectorAll('.videoContainer:not(.minimized)');
+      const count = containers.length;
       
       if (count <= 1) {
         grid.style.gridTemplateColumns = '1fr';
+        grid.style.gridTemplateRows = '1fr';
       } else if (count === 2) {
         grid.style.gridTemplateColumns = '1fr 1fr';
-      } else if (count <= 4) {
+        grid.style.gridTemplateRows = '1fr';
+      } else if (count === 3) {
+        // 2 on top, 1 on bottom
         grid.style.gridTemplateColumns = '1fr 1fr';
-      } else {
+        grid.style.gridTemplateRows = '1fr 1fr';
+      } else if (count === 4) {
+        // 2x2 grid
+        grid.style.gridTemplateColumns = '1fr 1fr';
+        grid.style.gridTemplateRows = '1fr 1fr';
+      } else if (count <= 6) {
+        // 3x2 grid
         grid.style.gridTemplateColumns = '1fr 1fr 1fr';
+        grid.style.gridTemplateRows = '1fr 1fr';
+      } else {
+        // 3x3 grid
+        grid.style.gridTemplateColumns = '1fr 1fr 1fr';
+        grid.style.gridTemplateRows = '1fr 1fr 1fr';
       }
     }
 
