@@ -686,8 +686,23 @@
     };
     
     // Initialize Firebase
-    firebase.initializeApp(firebaseConfig);
-    const database = firebase.database();
+    let database;
+    try {
+      const app = firebase.initializeApp(firebaseConfig);
+      database = firebase.database();
+      console.log('Firebase initialized successfully');
+      
+      // Test Firebase connection
+      database.ref('.info/connected').on('value', (snapshot) => {
+        if (snapshot.val() === true) {
+          console.log('Connected to Firebase Realtime Database');
+        } else {
+          console.log('Not connected to Firebase Realtime Database');
+        }
+      });
+    } catch (error) {
+      console.error('Firebase initialization error:', error);
+    }
 
     const users = [
       { name: "Miguel", avatar: "avatar-0.webp", emoji: "🦔" },
@@ -815,11 +830,13 @@
       try {
         const now = Date.now();
         
-        // Register in Firebase
+        // Register in Firebase with error handling
+        console.log('Attempting to register peer:', uuid);
         await database.ref(`peers/${uuid}`).set({
           timestamp: now,
           name: uuid
         });
+        console.log('Successfully registered in Firebase');
         
         // Clean up stale peers (older than 1 minute)
         const peersSnapshot = await database.ref('peers').once('value');
