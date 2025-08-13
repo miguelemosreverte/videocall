@@ -474,11 +474,11 @@
     const JSONBIN_API_KEY = '$2a$10$RWXovJmFo.sJ0tRptHowp.2vluFhdI6ds1R4fILpL.Bq09q4SZ6FS';
     const JSONBIN_BIN_ID = '689cb5b0ae596e708fc94426';
     
-    // Use CORS proxy for GitHub Pages, direct access for localhost
-    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const SIGNALING_SERVER = isLocalhost 
-      ? `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`
-      : `https://corsproxy.io/?https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
+    // Use CORS proxy only for GitHub Pages, direct access for local testing
+    const isGitHubPages = window.location.hostname === 'miguelemosreverte.github.io';
+    const SIGNALING_SERVER = isGitHubPages 
+      ? `https://corsproxy.io/?https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`
+      : `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
 
     const users = [
       { name: "Miguel", avatar: "avatar-0.webp", emoji: "🦔" },
@@ -801,27 +801,51 @@
     }
 
     async function sendToPeer(targetUuid, type, data) {
-      try {
-        const getResp = await fetch(SIGNALING_SERVER + '/latest', {
-          headers: { 'X-Master-Key': JSONBIN_API_KEY }
-        });
-        const result = await getResp.json();
-        const record = result.record || { messages: {} };
-        
-        record.messages = record.messages || {};
-        record.messages[targetUuid] = record.messages[targetUuid] || [];
-        record.messages[targetUuid].push({ type, data, from: myUuid });
-        
-        await fetch(SIGNALING_SERVER, {
-          method: 'PUT',
-          headers: {
-            'X-Master-Key': JSONBIN_API_KEY,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(record)
-        });
-      } catch (err) {
-        console.error('Send error:', err);
+      let retries = 3;
+      while (retries > 0) {
+        try {
+          const getResp = await fetch(SIGNALING_SERVER + '/latest', {
+            headers: { 'X-Master-Key': JSONBIN_API_KEY }
+          });
+          
+          if (getResp.status === 429) {
+            retries--;
+            if (retries > 0) {
+              await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+              continue;
+            }
+          }
+          
+          const result = await getResp.json();
+          const record = result.record || { messages: {} };
+          
+          record.messages = record.messages || {};
+          record.messages[targetUuid] = record.messages[targetUuid] || [];
+          record.messages[targetUuid].push({ type, data, from: myUuid });
+          
+          const putResp = await fetch(SIGNALING_SERVER, {
+            method: 'PUT',
+            headers: {
+              'X-Master-Key': JSONBIN_API_KEY,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(record)
+          });
+          
+          if (putResp.status === 429 && retries > 1) {
+            retries--;
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            continue;
+          }
+          
+          break; // Success
+        } catch (err) {
+          console.error('Send error:', err);
+          retries--;
+          if (retries > 0) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+        }
       }
     }
 
