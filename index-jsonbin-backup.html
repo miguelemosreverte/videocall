@@ -802,8 +802,8 @@
           }
         }
         
-        // Set up Firebase listeners for signaling messages
-        setupFirebaseListeners();
+        // Poll for signaling messages only until all peers are connected
+        pollForSignaling();
 
       } catch (err) {
         document.getElementById('errorMessage').textContent = 
@@ -867,21 +867,57 @@
     }
 
     async function sendToPeer(targetUuid, type, data) {
-      try {
-        const message = {
-          type,
-          data,
-          from: myUuid,
-          timestamp: Date.now()
-        };
-        
-        // Push to target's message queue in Firebase
-        await database.ref(`messages/${targetUuid}`).push(message);
-        console.log(`Sent ${type} to ${targetUuid} via Firebase`);
-        return true;
-      } catch (error) {
-        console.error('SendToPeer error:', error);
-        return false;
+      let retries = 3;
+      while (retries > 0) {
+        try {
+          // Use direct URL to avoid CORS proxy issues
+          const directUrl = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}/latest`;
+          const getResp = await fetch(directUrl, {
+            headers: { 'X-Master-Key': JSONBIN_API_KEY }
+          });
+          
+          if (getResp.status === 429) {
+            retries--;
+            if (retries > 0) {
+              await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+              continue;
+            }
+          }
+          
+          const result = await getResp.json();
+          const record = result.record || { messages: {} };
+          
+          record.messages = record.messages || {};
+          record.messages[targetUuid] = record.messages[targetUuid] || [];
+          const message = { type, data, from: myUuid };
+          record.messages[targetUuid].push(message);
+          console.log(`Sending ${type} to ${targetUuid}, queue length: ${record.messages[targetUuid].length}`);
+          
+          // Use direct URL for PUT as well
+          const putUrl = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
+          const putResp = await fetch(putUrl, {
+            method: 'PUT',
+            headers: {
+              'X-Master-Key': JSONBIN_API_KEY,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(record)
+          });
+          
+          if (putResp.status === 429 && retries > 1) {
+            retries--;
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            continue;
+          }
+          
+          break; // Success
+        } catch (err) {
+          console.error('Send error:', err);
+          retries--;
+          if (retries > 0) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+        }
       }
     }
 
@@ -1098,17 +1134,33 @@
           }
         });
         
-        // Also clean up dead peers from Firebase as master
+        // Also clean up dead peers from JSONBin as master
         if (deadPeers.length > 0) {
           try {
-            // Remove dead peers from Firebase
-            for (const deadPeer of deadPeers) {
-              await database.ref(`peers/${deadPeer}`).remove();
-              await database.ref(`messages/${deadPeer}`).remove();
-              console.log(`Master: Cleaned up dead peer ${deadPeer} from Firebase`);
+            const resp = await fetch(SIGNALING_SERVER + '/latest', {
+              headers: { 'X-Master-Key': JSONBIN_API_KEY }
+            });
+            if (resp.ok) {
+              const data = await resp.json();
+              const record = data.record || { peers: {}, messages: {} };
+              
+              // Remove dead peers from server
+              deadPeers.forEach(deadPeer => {
+                delete record.peers[deadPeer];
+                delete record.messages[deadPeer];
+              });
+              
+              await fetch(SIGNALING_SERVER, {
+                method: 'PUT',
+                headers: {
+                  'X-Master-Key': JSONBIN_API_KEY,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(record)
+              });
+              
+              console.log(`Master: Cleaned up ${deadPeers.length} dead peers from server`);
             }
-            
-            console.log(`Master: Cleaned up ${deadPeers.length} dead peers from Firebase`);
           } catch (err) {
             console.error('Master cleanup error:', err);
           }
@@ -1871,12 +1923,28 @@
 
     // Cleanup on exit
     window.addEventListener('beforeunload', async () => {
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+      }
       if (myUuid) {
         try {
-          // Remove from Firebase
-          await database.ref(`peers/${myUuid}`).remove();
-          await database.ref(`messages/${myUuid}`).remove();
-          console.log('Cleaned up peer from Firebase');
+          const getResp = await fetch(SIGNALING_SERVER + '/latest', {
+            headers: { 'X-Master-Key': JSONBIN_API_KEY }
+          });
+          const data = await getResp.json();
+          const record = data.record || {};
+          if (record.peers && record.peers[myUuid]) {
+            delete record.peers[myUuid];
+            delete record.messages[myUuid];
+            await fetch(SIGNALING_SERVER, {
+              method: 'PUT',
+              headers: {
+                'X-Master-Key': JSONBIN_API_KEY,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(record)
+            });
+          }
         } catch (err) {
           console.error('Cleanup error:', err);
         }
