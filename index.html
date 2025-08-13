@@ -818,8 +818,10 @@
               console.log(`Initiating connection to ${peerUuid}`);
               await createPeerConnection(peerUuid, true);
             } else {
-              // Don't create passive connection here - wait for peer-entered or offer
+              // Check if they should have initiated but haven't
               console.log(`Waiting for ${peerUuid} to initiate connection`);
+              // Send them a nudge to connect
+              await sendToPeer(peerUuid, 'request-connection', { from: myUuid });
             }
           }
         }
@@ -1120,6 +1122,10 @@
           }
           case 'announce-peers': {
             // Flood message to announce all known peers
+            if (!data) {
+              console.log('Received announce-peers with no data, ignoring');
+              break;
+            }
             const ttl = (data.ttl || 0) - 1;
             const origin = data.origin || from;
             
@@ -1164,6 +1170,22 @@
                     await createPeerConnection(peer, true);
                   }
                 }
+              }
+            }
+            break;
+          }
+          case 'request-connection': {
+            // Someone is asking us to connect to them
+            const requester = data.from || from;
+            console.log(`Received connection request from ${requester}`);
+            
+            if (!peers.has(requester)) {
+              const shouldInitiate = myUuid.localeCompare(requester) < 0;
+              if (shouldInitiate) {
+                console.log(`Honoring connection request - initiating to ${requester}`);
+                await createPeerConnection(requester, true);
+              } else {
+                console.log(`Connection request received but ${requester} should initiate`);
               }
             }
             break;
