@@ -810,10 +810,8 @@
     function setupFocusLayout() {
       const videoGrid = document.getElementById('videoGrid');
       
-      // Get ALL video containers from the entire document
+      // First, ensure all containers are back in the main videoGrid
       const allContainers = document.querySelectorAll('.videoContainer');
-      
-      // Move all containers back to main videoGrid first
       allContainers.forEach(container => {
         if (container.parentNode !== videoGrid) {
           videoGrid.appendChild(container);
@@ -824,10 +822,13 @@
       const existingStrip = document.querySelector('.thumbnail-strip');
       if (existingStrip) existingStrip.remove();
       
-      // Now work with all containers
-      const containers = Array.from(allContainers);
+      const containers = videoGrid.querySelectorAll('.videoContainer');
       const focusedContainer = document.getElementById(`video-${focusedUser}`);
       const isPortrait = window.innerHeight > window.innerWidth;
+      
+      console.log('Focus layout - Total containers:', containers.length);
+      console.log('Focus layout - Focused user:', focusedUser);
+      console.log('Focus layout - Container IDs:', Array.from(containers).map(c => c.id));
       
       containers.forEach(container => {
         container.classList.remove('focused', 'minimized', 'thumbnail');
@@ -846,7 +847,8 @@
         focusedContainer.classList.add('focused');
         
         // Create thumbnail strip for ALL other users (including yourself)
-        const otherContainers = containers.filter(c => c !== focusedContainer);
+        const otherContainers = Array.from(containers).filter(c => c !== focusedContainer);
+        console.log('Other containers for thumbnails:', otherContainers.map(c => c.id));
         
         if (otherContainers.length > 0) {
           const thumbnailStrip = document.createElement('div');
@@ -856,14 +858,14 @@
             container.classList.add('thumbnail');
             
             if (isMobile) {
-              // Clone the container for the thumbnail strip to avoid moving DOM elements
-              const thumbnailClone = container.cloneNode(true);
-              thumbnailClone.id = container.id + '-thumbnail';
-              thumbnailClone.style.position = 'static';
-              thumbnailStrip.appendChild(thumbnailClone);
-              
-              // Hide the original
-              container.style.display = 'none';
+              if (isPortrait) {
+                // Bottom strip
+                container.style.position = 'static';
+              } else {
+                // Right side strip
+                container.style.position = 'static';
+              }
+              thumbnailStrip.appendChild(container);
             } else {
               // Desktop: position thumbnails around edges
               container.style.position = 'fixed';
@@ -871,12 +873,11 @@
               container.style.right = '20px';
               container.style.width = '150px';
               container.style.height = '100px';
-              container.style.zIndex = '250';
             }
           });
           
           if (isMobile) {
-            videoGrid.appendChild(thumbnailStrip);
+            document.getElementById('videoGrid').appendChild(thumbnailStrip);
           }
         }
       }
