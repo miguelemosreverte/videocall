@@ -610,6 +610,13 @@
         // Start polling for peers
         isPolling = true;
         pollLoop();
+        
+        // Start heartbeat to keep registration alive
+        setInterval(() => {
+          if (myUuid && isPolling) {
+            registerPeer(myUuid);
+          }
+        }, 20000); // Update every 20 seconds (before 30s timeout)
 
       } catch (err) {
         document.getElementById('errorMessage').textContent = 
