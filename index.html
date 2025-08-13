@@ -675,7 +675,10 @@
               const pc = await createPeerConnection(peer, true);
               console.log(`Peer connection created for ${peer}, offer should have been sent`);
             } else {
-              console.log(`WILL WAIT: ${peer} should initiate connection to us`);
+              console.log(`WILL WAIT BUT CREATE CONNECTION: ${peer} should initiate to us`);
+              // Still create a connection to be ready for their offer
+              const pc = await createPeerConnection(peer, false);
+              console.log(`Passive connection created for ${peer}, ready for their offer`);
             }
           }
         }
@@ -818,10 +821,9 @@
               console.log(`Initiating connection to ${peerUuid}`);
               await createPeerConnection(peerUuid, true);
             } else {
-              // Check if they should have initiated but haven't
-              console.log(`Waiting for ${peerUuid} to initiate connection`);
-              // Send them a nudge to connect
-              await sendToPeer(peerUuid, 'request-connection', { from: myUuid });
+              // Create a passive connection anyway to be ready
+              console.log(`Creating passive connection for ${peerUuid}`);
+              await createPeerConnection(peerUuid, false);
             }
           }
         }
@@ -830,6 +832,19 @@
         const messages = await pollMessages();
         for (const msg of messages) {
           await handleSignalMessage(msg);
+        }
+        
+        // Failsafe: If we have peers but no connections after multiple polls, force connect
+        for (const peerUuid of activePeers) {
+          if (peerUuid === myUuid) continue;
+          
+          const pc = peers.get(peerUuid);
+          if (pc && !pc.remoteDescription && !pc.localDescription) {
+            console.log(`WARNING: No offer/answer exchanged with ${peerUuid} after polling, forcing offer`);
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            await sendToPeer(peerUuid, 'offer', offer);
+          }
         }
       } catch (err) {
         console.error('Polling error:', err);
