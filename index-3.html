@@ -419,20 +419,40 @@
           vec3 clouds = renderClouds(p, u_time);
           vec3 skyWithClouds = mix(skyColor, vec3(1.0), clouds.r * 0.7);
           
-          // Canopy movement - different speeds for each layer
-          float windX1 = sin(time * 0.7) * 0.05 + sin(time * 1.3) * 0.02;
-          float windY1 = cos(time * 0.5) * 0.03 + cos(time * 1.1) * 0.02;
+          // Hierarchical Perlin noise for natural branch/leaf movement
+          // Large scale movement (main branches swaying)
+          vec2 mainBranchMovement = vec2(
+            fbm(vec2(time * 0.1, 0.0)) - 0.5,
+            fbm(vec2(0.0, time * 0.08)) - 0.5
+          ) * 0.08;
           
-          float windX2 = sin(time * 0.9 + 1.0) * 0.04;
-          float windY2 = cos(time * 0.6 + 1.0) * 0.04;
+          // Medium scale movement (smaller branches)
+          vec2 secondaryBranchMovement = vec2(
+            fbm(vec2(time * 0.3, p.y * 0.5)) - 0.5,
+            fbm(vec2(p.x * 0.5, time * 0.25)) - 0.5
+          ) * 0.05;
           
-          float windX3 = sin(time * 1.1 + 2.0) * 0.03;
-          float windY3 = cos(time * 0.8 + 2.0) * 0.03;
+          // Small scale movement (individual leaves fluttering)
+          vec2 leafFlutter = vec2(
+            noise(p * 10.0 + vec2(time * 2.0, 0.0)) - 0.5,
+            noise(p * 10.0 + vec2(0.0, time * 1.8)) - 0.5
+          ) * 0.02;
           
-          // Create canopy layers with individual movement
-          vec3 v1 = voronoi((p + vec2(windX1, windY1)) * 6.0 + vec2(time * 0.3, 0.0));
-          vec3 v2 = voronoi((p + vec2(windX2, windY2)) * 12.0 + vec2(0.0, time * 0.2));
-          vec3 v3 = voronoi((p + vec2(windX3, windY3)) * 24.0 + vec2(time * 0.1, time * 0.15));
+          // Combine movements hierarchically
+          vec2 totalMovement = mainBranchMovement + secondaryBranchMovement + leafFlutter;
+          
+          // Apply position-based variation (leaves at edges move more)
+          float edgeFactor = length(p) * 0.3;
+          totalMovement *= 1.0 + edgeFactor;
+          
+          // Add turbulence for more organic feel
+          float turbulence = abs(fbm(p * 3.0 + time * 0.5) - 0.5);
+          totalMovement += vec2(turbulence * 0.01 * sin(time * 3.0), turbulence * 0.01 * cos(time * 2.7));
+          
+          // Create canopy layers with hierarchical movement
+          vec3 v1 = voronoi((p + totalMovement * 1.2) * 6.0 + vec2(fbm(vec2(time * 0.2, 0.0)) * 0.5, 0.0));
+          vec3 v2 = voronoi((p + totalMovement * 0.8 + secondaryBranchMovement) * 12.0 + vec2(0.0, fbm(vec2(0.0, time * 0.15)) * 0.3));
+          vec3 v3 = voronoi((p + totalMovement * 0.5 + leafFlutter * 2.0) * 24.0 + vec2(noise(vec2(time * 0.1, 0.0)) * 0.2, noise(vec2(0.0, time * 0.12)) * 0.2));
           
           // Combine voronoi cells for leaf coverage
           float leaves = smoothstep(0.0, 0.4, v1.x) * 
