@@ -915,8 +915,17 @@
         console.log(`Connection state with ${targetUuid}: ${pc.connectionState}`);
         if (pc.connectionState === 'connected') {
           console.log(`✅ CONNECTED to ${targetUuid}`);
-        } else if (pc.connectionState === 'failed') {
-          console.log(`❌ FAILED connection to ${targetUuid}`);
+        } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+          console.log(`❌ Connection to ${targetUuid} failed/disconnected - removing`);
+          // Clean up dead connection
+          pc.close();
+          peers.delete(targetUuid);
+          // Remove their video container
+          const container = document.getElementById(`video-${targetUuid}`);
+          if (container) {
+            container.remove();
+            adjustGridLayout();
+          }
         }
       };
       
@@ -1011,20 +1020,38 @@
       try {
         switch (type) {
           case 'peer-entered': {
-            // A new peer joined - just connect to them!
-            if (!peers.has(from)) {
-              console.log(`New peer ${from} entered - creating offer`);
-              await createPeerConnection(from, true);
+            // A new peer joined - replace any existing connection
+            const existingPc = peers.get(from);
+            if (existingPc) {
+              console.log(`Peer ${from} re-entered - closing old connection`);
+              existingPc.close();
+              peers.delete(from);
+              // Remove old video container
+              const container = document.getElementById(`video-${from}`);
+              if (container) {
+                container.remove();
+              }
             }
+            console.log(`Peer ${from} entered - creating new offer`);
+            await createPeerConnection(from, true);
             break;
           }
           case 'offer': {
             let pc = peers.get(from);
             
-            // If we already have a connection and it's stable, ignore this offer
-            if (pc && pc.signalingState === 'stable' && pc.remoteDescription) {
-              console.log(`Ignoring offer from ${from} - already have stable connection`);
-              break;
+            // If we have an existing connection, check if it's still alive
+            if (pc) {
+              if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
+                console.log(`Replacing dead connection to ${from}`);
+                pc.close();
+                peers.delete(from);
+                const container = document.getElementById(`video-${from}`);
+                if (container) container.remove();
+                pc = null;
+              } else if (pc.signalingState === 'stable' && pc.remoteDescription && pc.connectionState === 'connected') {
+                console.log(`Ignoring offer from ${from} - already have stable connection`);
+                break;
+              }
             }
             
             // Create connection if we don't have one
