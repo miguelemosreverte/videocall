@@ -144,12 +144,12 @@
       width: 100%;
       height: 100vh;
       background: rgba(0,0,0,0.8);
-      padding: 20px;
-      grid-gap: 15px;
+      padding: 10px;
       position: fixed;
       top: 0;
       left: 0;
       z-index: 100;
+      transition: all 0.3s ease;
     }
 
     .videoContainer {
@@ -158,12 +158,108 @@
       border-radius: 15px;
       overflow: hidden;
       box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .videoContainer:hover {
+      transform: scale(1.02);
+      box-shadow: 0 15px 40px rgba(0,0,0,0.4);
     }
 
     .videoContainer video {
       width: 100%;
       height: 100%;
       object-fit: cover;
+    }
+
+    /* Focus states */
+    .videoContainer.focused {
+      position: fixed !important;
+      top: 10px;
+      left: 10px;
+      right: 10px;
+      bottom: 10px;
+      z-index: 200;
+      transform: none;
+    }
+
+    .videoContainer.minimized {
+      position: fixed !important;
+      width: 150px !important;
+      height: 100px !important;
+      top: 20px;
+      right: 20px;
+      z-index: 300;
+    }
+
+    .videoContainer.thumbnail {
+      position: fixed !important;
+      width: 120px !important;
+      height: 80px !important;
+      z-index: 250;
+    }
+
+    /* Mobile layouts */
+    @media (max-width: 768px) {
+      #videoGrid {
+        padding: 5px;
+      }
+      
+      .videoContainer.minimized {
+        width: 120px !important;
+        height: 80px !important;
+        top: 10px;
+        right: 10px;
+      }
+      
+      .videoContainer.thumbnail {
+        width: 100px !important;
+        height: 70px !important;
+      }
+      
+      .videoContainer.focused {
+        top: 5px;
+        left: 5px;
+        right: 5px;
+        bottom: 100px; /* Leave space for thumbnails */
+      }
+    }
+
+    /* Portrait orientation */
+    @media (max-width: 768px) and (orientation: portrait) {
+      .thumbnail-strip {
+        position: fixed;
+        bottom: 10px;
+        left: 10px;
+        right: 10px;
+        height: 90px;
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+        z-index: 250;
+      }
+    }
+
+    /* Landscape orientation */
+    @media (max-width: 768px) and (orientation: landscape) {
+      .videoContainer.focused {
+        right: 130px; /* Leave space for side thumbnails */
+        bottom: 5px;
+      }
+      
+      .thumbnail-strip {
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        bottom: 10px;
+        width: 110px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        justify-content: flex-start;
+        z-index: 250;
+      }
     }
 
     .peerId {
@@ -246,6 +342,8 @@
     let localStream = null;
     let peer = null;
     const activeCalls = new Map();
+    let focusedUser = null;
+    let isMobile = window.innerWidth <= 768;
 
     // Initialize
     window.addEventListener('load', async () => {
@@ -499,10 +597,26 @@
           controls.appendChild(muteBtn);
         }
         
+        // Add click to focus functionality
+        container.onclick = (e) => {
+          // Don't trigger on button clicks
+          if (e.target.tagName === 'BUTTON') return;
+          toggleFocus(uuid);
+        };
+        
         container.appendChild(controls);
         document.getElementById('videoGrid').appendChild(container);
         
         adjustGridLayout();
+        
+        // On mobile, auto-minimize local user after a delay
+        if (isMobile && isLocal && document.querySelectorAll('.videoContainer').length > 1) {
+          setTimeout(() => {
+            if (!focusedUser) {
+              adjustGridLayout();
+            }
+          }, 1000);
+        }
       }
 
       const video = container.querySelector('video');
@@ -518,8 +632,97 @@
     }
 
     function adjustGridLayout() {
+      if (focusedUser) {
+        setupFocusLayout();
+        return;
+      }
+      
       const videoGrid = document.getElementById('videoGrid');
-      const containerCount = videoGrid.querySelectorAll('.videoContainer').length;
+      const containers = videoGrid.querySelectorAll('.videoContainer');
+      const containerCount = containers.length;
+      
+      // Reset all special classes
+      containers.forEach(container => {
+        container.classList.remove('focused', 'minimized', 'thumbnail');
+        container.style.position = '';
+        container.style.top = '';
+        container.style.left = '';
+        container.style.right = '';
+        container.style.bottom = '';
+        container.style.width = '';
+        container.style.height = '';
+      });
+      
+      // Remove thumbnail strip
+      const existingStrip = document.querySelector('.thumbnail-strip');
+      if (existingStrip) existingStrip.remove();
+      
+      if (isMobile) {
+        setupMobileLayout(containers);
+      } else {
+        setupDesktopLayout(containerCount);
+      }
+    }
+    
+    function setupMobileLayout(containers) {
+      const videoGrid = document.getElementById('videoGrid');
+      const isPortrait = window.innerHeight > window.innerWidth;
+      
+      if (containers.length === 1) {
+        // Just local user
+        videoGrid.style.display = 'flex';
+        videoGrid.style.alignItems = 'center';
+        videoGrid.style.justifyContent = 'center';
+        return;
+      }
+      
+      // Find local user and make them small
+      const localContainer = document.getElementById(`video-${myUuid}`);
+      if (localContainer) {
+        localContainer.classList.add('minimized');
+      }
+      
+      // Other users take main area
+      const remoteContainers = Array.from(containers).filter(c => c.id !== `video-${myUuid}`);
+      
+      if (remoteContainers.length === 1) {
+        // One remote user - they get the main area
+        const mainContainer = remoteContainers[0];
+        mainContainer.style.position = 'fixed';
+        mainContainer.style.top = '10px';
+        mainContainer.style.left = '10px';
+        mainContainer.style.right = '10px';
+        mainContainer.style.bottom = '10px';
+      } else {
+        // Multiple remote users - split the screen
+        remoteContainers.forEach((container, index) => {
+          container.style.position = 'fixed';
+          
+          if (isPortrait) {
+            // Split vertically
+            const height = `calc(${100 / remoteContainers.length}% - 20px)`;
+            container.style.top = `calc(${index * 100 / remoteContainers.length}% + 10px)`;
+            container.style.left = '10px';
+            container.style.right = '10px';
+            container.style.height = height;
+          } else {
+            // Split horizontally (landscape)
+            const width = `calc(${100 / remoteContainers.length}% - 20px)`;
+            container.style.left = `calc(${index * 100 / remoteContainers.length}% + 10px)`;
+            container.style.top = '10px';
+            container.style.bottom = '10px';
+            container.style.width = width;
+          }
+        });
+      }
+    }
+    
+    function setupDesktopLayout(containerCount) {
+      const videoGrid = document.getElementById('videoGrid');
+      videoGrid.style.display = 'grid';
+      videoGrid.style.alignItems = '';
+      videoGrid.style.justifyContent = '';
+      videoGrid.style.gridGap = '15px';
       
       if (containerCount === 1) {
         videoGrid.style.gridTemplateColumns = '1fr';
@@ -532,7 +735,90 @@
         videoGrid.style.gridTemplateColumns = 'repeat(3, 1fr)';
       }
     }
+    
+    function setupFocusLayout() {
+      const containers = document.querySelectorAll('.videoContainer');
+      const focusedContainer = document.getElementById(`video-${focusedUser}`);
+      const isPortrait = window.innerHeight > window.innerWidth;
+      
+      // Remove any existing thumbnail strip
+      const existingStrip = document.querySelector('.thumbnail-strip');
+      if (existingStrip) existingStrip.remove();
+      
+      containers.forEach(container => {
+        container.classList.remove('focused', 'minimized', 'thumbnail');
+        container.style.position = '';
+        container.style.top = '';
+        container.style.left = '';
+        container.style.right = '';
+        container.style.bottom = '';
+        container.style.width = '';
+        container.style.height = '';
+      });
+      
+      if (focusedContainer) {
+        focusedContainer.classList.add('focused');
+        
+        // Create thumbnail strip for other users
+        const otherContainers = Array.from(containers).filter(c => c !== focusedContainer);
+        if (otherContainers.length > 0) {
+          const thumbnailStrip = document.createElement('div');
+          thumbnailStrip.className = 'thumbnail-strip';
+          
+          otherContainers.forEach((container, index) => {
+            container.classList.add('thumbnail');
+            
+            if (isMobile) {
+              if (isPortrait) {
+                // Bottom strip
+                container.style.position = 'static';
+              } else {
+                // Right side strip
+                container.style.position = 'static';
+              }
+              thumbnailStrip.appendChild(container);
+            } else {
+              // Desktop: position thumbnails around edges
+              container.style.position = 'fixed';
+              container.style.top = `${20 + index * 100}px`;
+              container.style.right = '20px';
+              container.style.width = '150px';
+              container.style.height = '100px';
+            }
+          });
+          
+          if (isMobile) {
+            document.getElementById('videoGrid').appendChild(thumbnailStrip);
+          }
+        }
+      }
+    }
+    
+    function toggleFocus(uuid) {
+      if (focusedUser === uuid) {
+        // Unfocus
+        focusedUser = null;
+      } else {
+        // Focus on this user
+        focusedUser = uuid;
+      }
+      adjustGridLayout();
+    }
 
+    // Handle orientation change
+    window.addEventListener('orientationchange', () => {
+      setTimeout(() => {
+        isMobile = window.innerWidth <= 768;
+        adjustGridLayout();
+      }, 500);
+    });
+    
+    // Handle window resize
+    window.addEventListener('resize', () => {
+      isMobile = window.innerWidth <= 768;
+      adjustGridLayout();
+    });
+    
     // Cleanup on exit
     window.addEventListener('beforeunload', () => {
       if (peer) {
