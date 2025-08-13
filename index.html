@@ -276,30 +276,81 @@
 
     .video-controls {
       position: absolute;
-      bottom: 10px;
-      right: 10px;
+      bottom: 5px;
+      right: 5px;
       display: flex;
-      gap: 10px;
+      gap: 5px;
       z-index: 10;
+      transition: all 0.3s ease;
     }
 
     .control-btn {
-      background: rgba(0,0,0,0.5);
+      background: rgba(0,0,0,0.6);
       color: white;
       border: none;
-      padding: 8px 12px;
-      border-radius: 5px;
+      padding: 6px 8px;
+      border-radius: 4px;
       cursor: pointer;
-      font-size: 18px;
-      transition: background 0.3s;
+      font-size: 14px;
+      transition: all 0.3s;
+      min-width: 30px;
+      min-height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
 
     .control-btn:hover {
-      background: rgba(0,0,0,0.7);
+      background: rgba(0,0,0,0.8);
+      transform: scale(1.1);
     }
 
     .control-btn.muted {
-      background: rgba(255,0,0,0.5);
+      background: rgba(255,0,0,0.6);
+    }
+
+    /* Small video controls */
+    .videoContainer.minimized .video-controls {
+      bottom: 2px;
+      right: 2px;
+      gap: 2px;
+    }
+
+    .videoContainer.minimized .control-btn {
+      padding: 3px 4px;
+      font-size: 10px;
+      min-width: 20px;
+      min-height: 20px;
+      border-radius: 3px;
+    }
+
+    .videoContainer.thumbnail .video-controls {
+      bottom: 2px;
+      right: 2px;
+      gap: 2px;
+    }
+
+    .videoContainer.thumbnail .control-btn {
+      padding: 2px 3px;
+      font-size: 8px;
+      min-width: 16px;
+      min-height: 16px;
+      border-radius: 2px;
+    }
+
+    /* Hide controls on very small containers to prevent overlap */
+    @media (max-width: 768px) {
+      .videoContainer.minimized .video-controls,
+      .videoContainer.thumbnail .video-controls {
+        opacity: 0;
+        pointer-events: none;
+      }
+      
+      .videoContainer.minimized:hover .video-controls,
+      .videoContainer.thumbnail:hover .video-controls {
+        opacity: 1;
+        pointer-events: all;
+      }
     }
   </style>
 </head>
