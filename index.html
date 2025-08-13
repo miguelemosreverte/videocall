@@ -810,6 +810,11 @@
         const data = await getResp.json();
         const record = data.record || { peers: {}, messages: {} };
         
+        // Log existing messages to debug
+        const messageCount = Object.keys(record.messages || {}).reduce((sum, key) => 
+          sum + (record.messages[key] ? record.messages[key].length : 0), 0);
+        console.log(`Fetched record with ${messageCount} total messages across all queues`);
+        
         record.peers = record.peers || {};
         record.messages = record.messages || {};
         
@@ -917,6 +922,7 @@
           
           if (myMessages.length > 0) {
             console.log(`Received ${myMessages.length} messages:`, myMessages.map(m => `${m.type} from ${m.from}`));
+            console.log('Full messages:', JSON.stringify(myMessages).substring(0, 500));
             
             // Process messages
             for (const msg of myMessages) {
@@ -937,7 +943,7 @@
         } catch (error) {
           console.log('Polling error:', error.message);
         }
-      }, 3000); // Poll every 3 seconds for signaling only
+      }, 2000); // Poll every 2 seconds for signaling (faster for better reliability)
     }
 
     async function sendToPeer(targetUuid, type, data) {
@@ -961,7 +967,9 @@
           
           record.messages = record.messages || {};
           record.messages[targetUuid] = record.messages[targetUuid] || [];
-          record.messages[targetUuid].push({ type, data, from: myUuid });
+          const message = { type, data, from: myUuid };
+          record.messages[targetUuid].push(message);
+          console.log(`Sending ${type} to ${targetUuid}, queue length: ${record.messages[targetUuid].length}`);
           
           const putResp = await fetch(SIGNALING_SERVER, {
             method: 'PUT',
