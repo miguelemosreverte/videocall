@@ -1,0 +1,98 @@
+[
+  {
+    "name": "Line-000002.png",
+    "url": "assets/trees/Line-000002.png",
+    "trunkCenter": {
+      "x": 0.5,
+      "y": 0.75
+    }
+  },
+  {
+    "name": "Line-000003.png",
+    "url": "assets/trees/Line-000003.png",
+    "trunkCenter": {
+      "x": 0.48,
+      "y": 0.73
+    }
+  },
+  {
+    "name": "Line-000004.png",
+    "url": "assets/trees/Line-000004.png",
+    "trunkCenter": {
+      "x": 0.52,
+      "y": 0.76
+    }
+  },
+  {
+    "name": "Line-000005.png",
+    "url": "assets/trees/Line-000005.png",
+    "trunkCenter": {
+      "x": 0.5,
+      "y": 0.74
+    }
+  },
+  {
+    "name": "Line-000006.png",
+    "url": "assets/trees/Line-000006.png",
+    "trunkCenter": {
+      "x": 0.49,
+      "y": 0.75
+    }
+  },
+  {
+    "name": "Line-000007.png",
+    "url": "assets/trees/Line-000007.png",
+    "trunkCenter": {
+      "x": 0.51,
+      "y": 0.72
+    }
+  },
+  {
+    "name": "Line-000008.png",
+    "url": "assets/trees/Line-000008.png",
+    "trunkCenter": {
+      "x": 0.5,
+      "y": 0.75
+    }
+  },
+  {
+    "name": "Line-000009.png",
+    "url": "assets/trees/Line-000009.png",
+    "trunkCenter": {
+      "x": 0.48,
+      "y": 0.74
+    }
+  },
+  {
+    "name": "Line-000010.png",
+    "url": "assets/trees/Line-000010.png",
+    "trunkCenter": {
+      "x": 0.52,
+      "y": 0.73
+    }
+  },
+  {
+    "name": "Line-000011.png",
+    "url": "assets/trees/Line-000011.png",
+    "trunkCenter": {
+      "x": 0.5,
+      "y": 0.76
+    }
+  },
+  {
+    "name": "Line-000012.png",
+    "url": "assets/trees/Line-000012.png",
+    "trunkCenter": {
+      "x": 0.49,
+      "y": 0.74
+    }
+  },
+  {
+    "name": "Line-000013.png",
+    "url": "assets/trees/Line-000013.png",
+    "trunkCenter": {
+      "x": 0.51,
+      "y": 0.75
+    }
+  }
+]

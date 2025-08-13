@@ -2,322 +2,511 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Full-Screen WebRTC Call with Dynamic Grid</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Forest Friends Video Call - Progressive Loading</title>
   <style>
-    /* Force full window layout */
-    html, body {
+    * {
       margin: 0;
       padding: 0;
-      width: 100%;
-      height: 100%;
-      background: #e5e5e5;
-      overflow: hidden; /* Avoid page scrollbars */
-      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-    }
-
-    /* The green banner */
-    header {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: #4CAF50;
-      color: white;
-      padding: 20px;
-      font-size: 24px;
-      font-weight: bold;
-    }
-
-    /* Container for user selection, etc. */
-    #mainContainer {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: calc(100% - 80px); /* subtract header height approx */
-      padding: 20px;
       box-sizing: border-box;
     }
 
-    .hidden { display: none; }
-
-    /* Avatar selection row */
-    #userSelection {
-      display: flex;
-      flex-direction: row;
-      gap: 30px;
-      margin-bottom: 30px;
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      min-height: 100vh;
+      overflow: hidden;
+      position: relative;
+      background: #87CEEB;
     }
-    .avatarOption {
-      text-align: center;
-      cursor: pointer;
-      transition: transform 0.2s ease;
+
+    /* Loading states */
+    .background-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+    }
+
+    .background-image {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      min-width: 100%;
+      min-height: 100%;
+      width: auto;
+      height: auto;
+      object-fit: cover;
+      opacity: 0;
+      transition: opacity 0.5s ease-in-out;
+    }
+
+    .background-image.loaded {
       opacity: 1;
     }
-    .avatarOption.disabled {
-      pointer-events: none;
-      opacity: 0.3;
-    }
-    .avatarOption:hover {
-      transform: scale(1.05);
-    }
-    .avatarImage {
-      width: 120px;
-      height: 120px;
-      border-radius: 50%;
-      object-fit: cover;
-      margin-bottom: 10px;
-      border: 3px solid transparent;
-    }
-    .avatarSelected {
-      border-color: #4CAF50 !important;
-    }
-    .avatarName {
-      font-weight: bold;
-      font-size: 16px;
+
+    .background-image.animated {
+      animation: slowZoom 60s ease-in-out infinite alternate;
     }
 
-    #errorMessage {
-      color: red;
-      font-weight: bold;
-      text-align: center;
-      margin: 10px 0;
-    }
-
-    #joinButton {
-      background: #4CAF50;
-      color: white;
-      border: none;
-      padding: 12px 20px;
-      font-size: 18px;
-      border-radius: 6px;
-      cursor: pointer;
-      margin-top: 20px;
-    }
-    #joinButton:hover {
-      background: #45a049;
-    }
-
-    /* Once joined, entire body becomes the video grid container */
-    /* We'll keep #videoGrid hidden at first, then show it + set display:grid */
-    #videoGrid {
-      display: none; /* hidden until user joins */
-      width: 100%;
-      height: 100%;
-      box-sizing: border-box;
-      background: #111;
-      padding: 10px;
-      /* We'll set grid-template-columns dynamically in JS (adjustGridLayout) */
-      grid-auto-rows: auto;
-      gap: 10px;
-      position: relative; /* for the slider overlay if you want it inside */
-    }
-
-    .videoContainer {
-      position: relative;
-      background: #000;
-      border-radius: 6px;
-      overflow: hidden;
-      width: 100%;
-      padding-bottom: 56.25%; /* 16:9 ratio */
-    }
-    .videoContainer video {
+    /* Placeholder gradient while loading */
+    .loading-gradient {
       position: absolute;
       top: 0;
       left: 0;
       width: 100%;
       height: 100%;
-      object-fit: cover;
+      background: linear-gradient(135deg, #87CEEB 0%, #98D98E 50%, #90EE90 100%);
+      opacity: 1;
+      transition: opacity 1s ease-out;
     }
-    .peerId {
-      position: absolute;
-      bottom: 10px;
-      left: 10px;
-      background: rgba(0,0,0,0.6);
-      color: white;
-      padding: 5px 10px;
-      border-radius: 4px;
-      font-size: 14px;
+
+    .loading-gradient.hidden {
+      opacity: 0;
+      pointer-events: none;
     }
-    .avatarOverlay {
-      position: absolute;
-      top: 0; left: 0;
-      width: 100%; height: 100%;
+
+    /* Dynamic keyframes injected by JS */
+
+    /* Main content */
+    .container {
+      position: relative;
+      z-index: 10;
+      min-height: 100vh;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
-      background: #000;
-      z-index: 1;
-      opacity: 0;
-      transition: opacity 0.3s ease;
+      padding: 20px;
     }
-    .avatarOverlay.active {
-      opacity: 1;
+
+
+    .avatar-grid {
+      display: flex;
+      justify-content: center;
+      gap: clamp(30px, 5vw, 60px);
+      flex-wrap: wrap;
     }
-    .avatarOverlay img {
-      width: 120px;
-      height: 120px;
+
+    .avatar-option {
+      cursor: pointer;
+      transition: all 0.3s ease;
+      text-align: center;
+    }
+
+    .avatar-option:hover {
+      transform: translateY(-5px);
+    }
+
+    .avatar-image {
+      width: clamp(100px, 15vw, 140px);
+      height: clamp(100px, 15vw, 140px);
       border-radius: 50%;
       object-fit: cover;
-      border: 3px solid #4CAF50;
+      border: 4px solid transparent;
+      transition: all 0.3s ease;
+      box-shadow: 0 5px 20px rgba(0,0,0,0.1);
     }
 
-    /* The slider UI for manual grid override */
-    #gridControls {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      background: rgba(255,255,255,0.85);
-      padding: 6px 12px;
-      border-radius: 4px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    #gridControls label {
-      font-size: 14px;
-      color: #333;
-      margin-right: 4px;
-    }
-    #gridControls input {
-      cursor: pointer;
+    .avatar-option:hover .avatar-image {
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      border-color: #90EE90;
     }
 
-    /* Overlays */
-    #status {
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      background: white;
-      padding: 10px 20px;
-      border-radius: 4px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      font-size: 14px;
-      z-index: 9999;
+    .avatar-selected .avatar-image {
+      border-color: #4a7c20 !important;
+      box-shadow: 0 0 0 3px rgba(74, 124, 32, 0.2);
     }
-    #debugInfo {
-      position: absolute;
-      bottom: 10px;
-      left: 10px;
-      max-width: 400px;
-      max-height: 200px;
-      overflow: auto;
+
+    .avatar-option.disabled {
+      opacity: 0.4;
+      pointer-events: none;
+    }
+
+
+    .hidden {
+      display: none !important;
+    }
+
+    .error-message {
+      color: #d9534f;
+      text-align: center;
+      margin-top: 15px;
+      font-weight: 500;
+    }
+
+
+    /* Video grid */
+    #videoGrid {
+      display: none;
+      width: 100%;
+      height: 100vh;
       background: rgba(0,0,0,0.8);
+      padding: 20px;
+      grid-gap: 15px;
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 100;
+    }
+
+    .videoContainer {
+      position: relative;
+      background: #000;
+      border-radius: 15px;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    }
+
+    .videoContainer video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .peerId {
+      position: absolute;
+      bottom: 15px;
+      left: 15px;
+      background: rgba(0,0,0,0.7);
       color: white;
-      padding: 10px;
-      border-radius: 4px;
-      font-family: monospace;
-      font-size: 12px;
-      z-index: 9999;
+      padding: 8px 15px;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: 500;
     }
   </style>
 </head>
 <body>
-  <header id="topBanner">Welcome! Select your user</header>
-
-  <div id="mainContainer">
-    <!-- Avatars to choose from -->
-    <div id="userSelection"></div>
-    <!-- Error messages -->
-    <div id="errorMessage"></div>
-    <!-- Join button -->
-    <button id="joinButton" class="hidden">Join Call</button>
+  <!-- Background layers -->
+  <div class="background-container">
+    <div class="loading-gradient" id="loadingGradient"></div>
+    <img class="background-image" id="backgroundLow" alt="" />
+    <img class="background-image" id="backgroundHigh" alt="" />
   </div>
 
-  <!-- The full-screen video grid (hidden until user joins) -->
-  <div id="videoGrid">
-    <!-- Optional: A small UI to override columns manually -->
-    <div id="gridControls" class="hidden">
-      <label for="colSlider">Manual Grid Columns:</label>
-      <input id="colSlider" type="range" min="1" max="6" step="1" value="0" />
-      <span id="colValue"></span>
-      <button id="resetGrid">Auto</button>
-    </div>
+
+  <!-- Main content -->
+  <div class="container">
+    <div id="userSelection" class="avatar-grid"></div>
+    <div id="errorMessage" class="error-message"></div>
   </div>
 
-  <!-- Debug info overlays -->
-  <div id="status">Ready</div>
-  <div id="debugInfo"></div>
+  <!-- Video grid (hidden until joined) -->
+  <div id="videoGrid"></div>
 
   <script>
     // =========================================================================
-    // CONFIG & STATE
+    // PROGRESSIVE IMAGE LOADING SYSTEM
     // =========================================================================
-    // Using JSONBin.io as a free HTTPS signaling service
-    // This provides a simple JSON storage that works with GitHub Pages
-    const JSONBIN_API_KEY = '$2a$10$RWXovJmFo.sJ0tRptHowp.2vluFhdI6ds1R4fILpL.Bq09q4SZ6FS';
-    const JSONBIN_BIN_ID = '689cb5b0ae596e708fc94426';
-    const SIGNALING_SERVER = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`
+    
+    // Device detection
+    const DeviceProfile = {
+      isMobile: /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent),
+      isLowEnd: navigator.hardwareConcurrency <= 2,
+      connectionSpeed: navigator.connection?.effectiveType || '4g',
+      screenWidth: window.innerWidth,
+      screenHeight: window.innerHeight,
+      deviceMemory: navigator.deviceMemory || 4,
+      
+      getProfile() {
+        if (this.isMobile || this.deviceMemory < 4 || this.isLowEnd) {
+          return 'mobile';
+        } else if (this.deviceMemory >= 8 && this.screenWidth > 1920) {
+          return 'desktop-high';
+        } else {
+          return 'desktop';
+        }
+      }
+    };
 
-    // Hardcoded user list
-    const users = [
-      { name: "Miguel",      avatar: "avatar-0.webp" },
-      { name: "Anastasiia",  avatar: "avatar-6.webp" },
-      { name: "Mariana",     avatar: "avatar-5.webp" }
+    // Image configuration
+    const backgroundImages = [
+      {
+        name: "Line-000002.png",
+        url: "assets/trees/Line-000002.png",
+        zoomedUrl: "assets/trees/zoomed/Line-000002-zoomed.jpg", 
+        trunkCenter: { x: 0.367, y: 0.372 }
+      },
+      {
+        name: "Line-000003.png",
+        url: "assets/trees/Line-000003.png",
+        zoomedUrl: "assets/trees/zoomed/Line-000003-zoomed.jpg",
+        trunkCenter: { x: 0.570, y: 0.402 }
+      },
+      {
+        name: "Line-000004.png",
+        url: "assets/trees/Line-000004.png",
+        zoomedUrl: "assets/trees/zoomed/Line-000004-zoomed.jpg",
+        trunkCenter: { x: 0.633, y: 0.441 }
+      },
+      {
+        name: "Line-000005.png",
+        url: "assets/trees/Line-000005.png",
+        zoomedUrl: "assets/trees/zoomed/Line-000005-zoomed.jpg",
+        trunkCenter: { x: 0.249, y: 0.620 }
+      },
+      {
+        name: "Line-000006.png",
+        url: "assets/trees/Line-000006.png",
+        zoomedUrl: "assets/trees/zoomed/Line-000006-zoomed.jpg",
+        trunkCenter: { x: 0.699, y: 0.855 }
+      },
+      {
+        name: "Line-000007.png",
+        url: "assets/trees/Line-000007.png",
+        zoomedUrl: "assets/trees/zoomed/Line-000007-zoomed.jpg",
+        trunkCenter: { x: 0.281, y: 0.627 }
+      },
+      {
+        name: "Line-000008.png",
+        url: "assets/trees/Line-000008.png",
+        zoomedUrl: "assets/trees/zoomed/Line-000008-zoomed.jpg",
+        trunkCenter: { x: 0.261, y: 0.653 }
+      },
+      {
+        name: "Line-000009.png",
+        url: "assets/trees/Line-000009.png",
+        zoomedUrl: "assets/trees/zoomed/Line-000009-zoomed.jpg",
+        trunkCenter: { x: 0.312, y: 0.665 }
+      },
+      {
+        name: "Line-000010.png",
+        url: "assets/trees/Line-000010.png",
+        zoomedUrl: "assets/trees/zoomed/Line-000010-zoomed.jpg",
+        trunkCenter: { x: 0.352, y: 0.646 }
+      },
+      {
+        name: "Line-000011.png",
+        url: "assets/trees/Line-000011.png",
+        zoomedUrl: "assets/trees/zoomed/Line-000011-zoomed.jpg",
+        trunkCenter: { x: 0.351, y: 0.698 }
+      },
+      {
+        name: "Line-000012.png",
+        url: "assets/trees/Line-000012.png",
+        zoomedUrl: "assets/trees/zoomed/Line-000012-zoomed.jpg",
+        trunkCenter: { x: 0.321, y: 0.631 }
+      },
+      {
+        name: "Line-000013.png",
+        url: "assets/trees/Line-000013.png",
+        zoomedUrl: "assets/trees/zoomed/Line-000013-zoomed.jpg",
+        trunkCenter: { x: 0.315, y: 0.566 }
+      }
     ];
 
-    // For “smart poll”
-    let lastPeerCount = 0;
-    let hasChanges = false;
-    const minPollInterval = 2000;
-    const maxPollInterval = 10000;
-    let isPolling = false;
+    // Cache management
+    class ImageCache {
+      constructor() {
+        this.cache = new Map();
+        this.maxSize = DeviceProfile.isMobile ? 2 : 5; // Max images to keep in memory
+      }
 
-    // For dynamic grid columns
-    let manualGridOverride = false;
+      async preloadImage(url) {
+        if (this.cache.has(url)) {
+          return this.cache.get(url);
+        }
 
-    // DOM elements
-    const topBanner = document.getElementById('topBanner');
-    const mainContainer = document.getElementById('mainContainer');
-    const userSelectionDiv = document.getElementById('userSelection');
-    const errorMessage = document.getElementById('errorMessage');
-    const joinButton = document.getElementById('joinButton');
-    const videoGrid = document.getElementById('videoGrid');
-    const gridControls = document.getElementById('gridControls');
-    const colSlider = document.getElementById('colSlider');
-    const colValue = document.getElementById('colValue');
-    const resetGridBtn = document.getElementById('resetGrid');
-    const statusDiv = document.getElementById('status');
-    const debugInfo = document.getElementById('debugInfo');
+        return new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => {
+            // Manage cache size
+            if (this.cache.size >= this.maxSize) {
+              const firstKey = this.cache.keys().next().value;
+              this.cache.delete(firstKey);
+            }
+            this.cache.set(url, img);
+            resolve(img);
+          };
+          img.onerror = reject;
+          img.src = url;
+        });
+      }
 
-    // WebRTC
+      has(url) {
+        return this.cache.has(url);
+      }
+    }
+
+    const imageCache = new ImageCache();
+
+    // Progressive loader
+    class ProgressiveImageLoader {
+      constructor() {
+        this.profile = DeviceProfile.getProfile();
+        this.currentImage = null;
+      }
+
+      async loadBackgroundImage() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const zoomSpeed = urlParams.get('zoom') || '60';
+        const imageIndex = urlParams.get('img');
+        
+        // Select image based on device profile
+        let selectedImage;
+        if (this.profile === 'mobile') {
+          // Mobile: always use the same image for consistency
+          selectedImage = backgroundImages[5]; // Line-000006 as default
+        } else {
+          // Desktop: random or specified
+          if (imageIndex !== null && imageIndex >= 0 && imageIndex < backgroundImages.length) {
+            selectedImage = backgroundImages[imageIndex];
+          } else {
+            selectedImage = backgroundImages[Math.floor(Math.random() * backgroundImages.length)];
+          }
+        }
+
+        this.currentImage = selectedImage;
+        
+        const loadingGradient = document.getElementById('loadingGradient');
+        const bgLow = document.getElementById('backgroundLow');
+        const bgHigh = document.getElementById('backgroundHigh');
+
+        try {
+          if (this.profile === 'mobile') {
+            // Mobile: Load zoomed version only
+            const zoomedImg = await imageCache.preloadImage(selectedImage.zoomedUrl);
+            bgLow.src = zoomedImg.src;
+            bgLow.classList.add('loaded');
+            loadingGradient.classList.add('hidden');
+            
+            // No animation on mobile - already zoomed
+            
+          } else if (this.profile === 'desktop') {
+            // Desktop: Progressive loading
+            // 1. Try to load zoomed version first (faster)
+            try {
+              const zoomedImg = await imageCache.preloadImage(selectedImage.zoomedUrl);
+              bgLow.src = zoomedImg.src;
+              bgLow.classList.add('loaded');
+              loadingGradient.classList.add('hidden');
+            } catch (e) {
+              console.log('Zoomed version not available, loading full');
+            }
+            
+            // 2. Load full version in background
+            const fullImg = await imageCache.preloadImage(selectedImage.url);
+            bgHigh.src = fullImg.src;
+            bgHigh.classList.add('loaded');
+            
+            // 3. Hide low quality once high is loaded
+            setTimeout(() => {
+              bgLow.style.display = 'none';
+              // Enable zoom animation
+              this.setupZoomAnimation(selectedImage, zoomSpeed);
+              bgHigh.classList.add('animated');
+            }, 500);
+            
+            
+            // 4. Preload next image if desktop-high
+            if (this.profile === 'desktop-high') {
+              this.preloadNext();
+            }
+            
+          } else {
+            // Desktop-high: Load full immediately + preload others
+            const fullImg = await imageCache.preloadImage(selectedImage.url);
+            bgHigh.src = fullImg.src;
+            bgHigh.classList.add('loaded');
+            loadingGradient.classList.add('hidden');
+            
+            this.setupZoomAnimation(selectedImage, zoomSpeed);
+            bgHigh.classList.add('animated');
+            
+            
+            // Preload multiple images
+            this.preloadNext(3);
+          }
+          
+        } catch (error) {
+          console.error('Failed to load image:', error);
+          // Keep gradient as fallback
+        }
+
+      }
+
+      setupZoomAnimation(image, duration) {
+        const offsetX = (image.trunkCenter.x - 0.5) * 200;
+        const offsetY = (image.trunkCenter.y - 0.5) * 200;
+        
+        const style = document.createElement('style');
+        style.textContent = `
+          @keyframes slowZoom {
+            0% {
+              transform: translate(-50%, -50%) scale(1.0);
+            }
+            100% {
+              transform: translate(calc(-50% + ${offsetX}px), calc(-50% + ${offsetY}px)) scale(1.5);
+            }
+          }
+          .animated {
+            animation-duration: ${duration}s !important;
+          }
+        `;
+        document.head.appendChild(style);
+      }
+
+      async preloadNext(count = 1) {
+        // Preload next random images in background
+        const indices = new Set();
+        while (indices.size < count) {
+          indices.add(Math.floor(Math.random() * backgroundImages.length));
+        }
+        
+        for (const idx of indices) {
+          if (backgroundImages[idx] !== this.currentImage) {
+            try {
+              await imageCache.preloadImage(backgroundImages[idx].url);
+                  } catch (e) {
+              // Silent fail for preloads
+            }
+          }
+        }
+      }
+    }
+
+    // =========================================================================
+    // VIDEO CALL APPLICATION
+    // =========================================================================
+    const JSONBIN_API_KEY = '$2a$10$RWXovJmFo.sJ0tRptHowp.2vluFhdI6ds1R4fILpL.Bq09q4SZ6FS';
+    const JSONBIN_BIN_ID = '689cb5b0ae596e708fc94426';
+    const SIGNALING_SERVER = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
+
+    const users = [
+      { name: "Miguel", avatar: "avatar-0.webp", emoji: "🦔" },
+      { name: "Anastasiia", avatar: "avatar-6.webp", emoji: "🐿️" },
+      { name: "Mariana", avatar: "avatar-5.webp", emoji: "🦜" }
+    ];
+
     let myUuid = null;
     let localStream = null;
     const peers = new Map();
+    let isPolling = false;
 
     const iceServers = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' }
+        { urls: 'stun:stun1.l.google.com:19302' }
       ]
     };
 
-    // =========================================================================
-    // LOG + STATUS
-    // =========================================================================
-    function log(msg, data=null) {
-      const time = new Date().toLocaleTimeString();
-      const text = data ? `${time} - ${msg}: ${JSON.stringify(data)}` : `${time} - ${msg}`;
-      console.log(msg, data);
-      debugInfo.innerHTML = text + "<br>" + debugInfo.innerHTML;
-    }
-    function updateStatus(text) {
-      statusDiv.textContent = text;
-    }
-
-    // =========================================================================
-    // ON LOAD
-    // =========================================================================
+    // Initialize
     window.addEventListener('load', async () => {
+      // Start loading background
+      const loader = new ProgressiveImageLoader();
+      await loader.loadBackgroundImage();
+      
+      // Load user selection
       try {
         const activePeers = await fetchActivePeers();
         showUserSelection(users, activePeers);
       } catch (error) {
-        log('Error loading active peers', error.message);
-        // If fail, show all anyway
+        console.log('Starting in offline mode');
         showUserSelection(users, []);
       }
-      setupGridControls();
     });
 
     async function fetchActivePeers() {
@@ -334,7 +523,6 @@
         }
         const data = await resp.json();
         const record = data.record || {};
-        // Clean up old peers (older than 30 seconds)
         const now = Date.now();
         const activePeers = [];
         for (const [peer, timestamp] of Object.entries(record.peers || {})) {
@@ -349,17 +537,14 @@
       }
     }
 
-    // =========================================================================
-    // USER SELECTION
-    // =========================================================================
     function showUserSelection(allUsers, takenList) {
+      const userSelectionDiv = document.getElementById('userSelection');
       userSelectionDiv.innerHTML = '';
 
       allUsers.forEach(u => {
         const wrapper = document.createElement('div');
-        wrapper.className = 'avatarOption';
-
-        // If user is taken, disable
+        wrapper.className = 'avatar-option';
+        
         if (takenList.includes(u.name)) {
           wrapper.classList.add('disabled');
         }
@@ -367,94 +552,82 @@
         const img = document.createElement('img');
         img.src = u.avatar;
         img.alt = u.name;
-        img.className = 'avatarImage';
+        img.className = 'avatar-image';
 
-        const label = document.createElement('div');
-        label.className = 'avatarName';
-        label.textContent = u.name;
-
-        // On click => pick if not disabled
         wrapper.onclick = () => {
           if (wrapper.classList.contains('disabled')) return;
-          document.querySelectorAll('.avatarImage').forEach(el => el.classList.remove('avatarSelected'));
-          img.classList.add('avatarSelected');
-
+          
+          document.querySelectorAll('.avatar-option').forEach(el => 
+            el.classList.remove('avatar-selected')
+          );
+          wrapper.classList.add('avatar-selected');
+          
           myUuid = u.name;
-          errorMessage.textContent = '';
-          joinButton.classList.remove('hidden');
+          document.getElementById('errorMessage').textContent = '';
+          
+          // Immediately join the call
+          setTimeout(() => joinCall(), 100);
         };
 
         wrapper.appendChild(img);
-        wrapper.appendChild(label);
         userSelectionDiv.appendChild(wrapper);
       });
     }
 
     // =========================================================================
-    // JOIN BUTTON
+    // JOIN CALL
     // =========================================================================
-    joinButton.onclick = async () => {
+    async function joinCall() {
       if (!myUuid) {
-        errorMessage.textContent = 'Please select a user!';
+        document.getElementById('errorMessage').textContent = 'Please select an avatar!';
         return;
       }
-      joinButton.disabled = true;
-      errorMessage.textContent = '';
-      updateStatus(`Accessing camera for "${myUuid}"...`);
-      log('Starting session', myUuid);
+
+      document.getElementById('errorMessage').textContent = '';
 
       try {
-        // 1) local stream
-        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        log('Got local stream', {
-          tracks: localStream.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled }))
+        // Get camera/mic
+        localStream = await navigator.mediaDevices.getUserMedia({ 
+          video: true, 
+          audio: true 
         });
 
-        // display local
-        createOrUpdateVideoContainer(myUuid, localStream, true);
-
-        // 2) register
+        // Register with signaling
         await registerPeer(myUuid);
 
-        // 3) hide banner + main, show full grid
-        topBanner.style.display = 'none';
-        mainContainer.style.display = 'none';
-        videoGrid.style.display = 'grid'; // apply grid layout
-        updateStatus(`Connected as "${myUuid}"`);
+        // Switch to video view
+        document.querySelector('.container').style.display = 'none';
+        
+        const videoGrid = document.getElementById('videoGrid');
+        videoGrid.style.display = 'grid';
+        videoGrid.style.gridTemplateColumns = '1fr';
 
-        // 4) start poll
+        // Add local video
+        createVideoContainer(myUuid, localStream, true);
+
+        // Start polling for peers
         isPolling = true;
         pollLoop();
 
-        // start bandwidth monitor
-        monitorConnection();
-
-        // show the slider controls (optional)
-        gridControls.classList.remove('hidden');
-
       } catch (err) {
-        joinButton.disabled = false;
-        log('Setup error', err.message);
-        errorMessage.textContent = err.message;
+        document.getElementById('errorMessage').textContent = 
+          'Error: ' + err.message;
       }
-    };
+    }
 
     async function registerPeer(uuid) {
       try {
-        // Get current data
         const getResp = await fetch(SIGNALING_SERVER + '/latest', {
           headers: { 'X-Master-Key': JSONBIN_API_KEY }
         });
         const data = await getResp.json();
         const record = data.record || { peers: {}, messages: {} };
         
-        // Add this peer with timestamp
         record.peers = record.peers || {};
         record.peers[uuid] = Date.now();
         record.messages = record.messages || {};
         record.messages[uuid] = [];
         
-        // Update the bin
         const updateResp = await fetch(SIGNALING_SERVER, {
           method: 'PUT',
           headers: {
@@ -467,60 +640,38 @@
         if (!updateResp.ok) {
           throw new Error(`Registration failed: ${updateResp.status}`);
         }
-        log('Registered with JSONBin', { uuid });
+        console.log('Registered with signaling server');
         return { uuid, registered: true };
       } catch (error) {
-        log('Registration error - continuing in local mode', error.message);
+        console.log('Registration error - continuing in local mode');
         return { uuid, registered: false };
       }
     }
 
-    // =========================================================================
-    // POLL LOOP
-    // =========================================================================
     async function pollLoop() {
       if (!isPolling) return;
 
       try {
-        // 1) active peers
         const activePeers = await fetchActivePeers();
-        if (activePeers.length !== lastPeerCount) {
-          hasChanges = true;
-          lastPeerCount = activePeers.length;
-        }
-
-        // 2) create offers if needed
+        
+        // Create connections for new peers
         for (const peerUuid of activePeers) {
           if (peerUuid === myUuid) continue;
-          if (myUuid < peerUuid) {
-            if (!peers.has(peerUuid)) {
-              const pc = createPeerConnection(peerUuid);
-              log('Creating offer', peerUuid);
-              const offer = await pc.createOffer();
-              await pc.setLocalDescription(offer);
-              await sendToPeer(peerUuid, 'offer', offer);
-              hasChanges = true;
-            }
+          if (myUuid < peerUuid && !peers.has(peerUuid)) {
+            await createPeerConnection(peerUuid, true);
           }
         }
 
-        // 3) poll messages
-        const msgs = await pollMessages();
-        if (msgs.length > 0) {
-          hasChanges = true;
-        }
-        for (const msg of msgs) {
+        // Poll for messages
+        const messages = await pollMessages();
+        for (const msg of messages) {
           await handleSignalMessage(msg);
         }
       } catch (err) {
-        log('Polling error', err.message);
-        updateStatus('Connection error - retrying...');
+        console.error('Polling error:', err);
       }
 
-      // next interval
-      const nextInterval = hasChanges ? minPollInterval : maxPollInterval;
-      hasChanges = false;
-      setTimeout(pollLoop, nextInterval);
+      setTimeout(pollLoop, 2000);
     }
 
     async function pollMessages() {
@@ -535,7 +686,6 @@
         const record = data.record || { messages: {} };
         const myMessages = record.messages?.[myUuid] || [];
         
-        // Clear messages after reading
         if (myMessages.length > 0) {
           record.messages[myUuid] = [];
           await fetch(SIGNALING_SERVER, {
@@ -546,31 +696,26 @@
             },
             body: JSON.stringify(record)
           });
-          log('Received messages', { count: myMessages.length });
         }
         return myMessages;
       } catch (error) {
-        log('Poll error', error.message);
         return [];
       }
     }
 
     async function sendToPeer(targetUuid, type, data) {
       try {
-        // Get current data
         const getResp = await fetch(SIGNALING_SERVER + '/latest', {
           headers: { 'X-Master-Key': JSONBIN_API_KEY }
         });
         const result = await getResp.json();
         const record = result.record || { messages: {} };
         
-        // Add message for target peer
         record.messages = record.messages || {};
         record.messages[targetUuid] = record.messages[targetUuid] || [];
         record.messages[targetUuid].push({ type, data, from: myUuid });
         
-        // Update the bin
-        const updateResp = await fetch(SIGNALING_SERVER, {
+        await fetch(SIGNALING_SERVER, {
           method: 'PUT',
           headers: {
             'X-Master-Key': JSONBIN_API_KEY,
@@ -578,72 +723,40 @@
           },
           body: JSON.stringify(record)
         });
-        
-        if (!updateResp.ok) {
-          throw new Error(`Send failed: ${updateResp.status}`);
-        }
-        log('Sent message', { to: targetUuid, type });
       } catch (err) {
-        log('Send error', err.message);
+        console.error('Send error:', err);
       }
     }
 
     // =========================================================================
     // WEBRTC
     // =========================================================================
-    function createPeerConnection(targetUuid) {
-      if (peers.has(targetUuid)) {
-        return peers.get(targetUuid).pc;
-      }
-      log('Creating peer connection', targetUuid);
+    async function createPeerConnection(targetUuid, createOffer) {
+      if (peers.has(targetUuid)) return peers.get(targetUuid);
 
       const pc = new RTCPeerConnection(iceServers);
-      const peerInfo = {
-        pc,
-        iceCandidates: [],
-        hasRemoteDescription: false,
-        container: null,
-        avatarOverlayElem: null
-      };
-      peers.set(targetUuid, peerInfo);
-
-      pc.onconnectionstatechange = () => {
-        log('connectionState', { targetUuid, state: pc.connectionState });
-        if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-          showAvatarOverlay(targetUuid, true);
-        } else if (pc.connectionState === 'connected') {
-          showAvatarOverlay(targetUuid, false);
-        }
-        updateStatus(`Peer ${targetUuid}: ${pc.connectionState}`);
-      };
-
-      pc.oniceconnectionstatechange = () => {
-        log('ICE state', { targetUuid, state: pc.iceConnectionState });
-        if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
-          showAvatarOverlay(targetUuid, true);
-        } else if (pc.iceConnectionState === 'connected') {
-          showAvatarOverlay(targetUuid, false);
-        }
-      };
+      peers.set(targetUuid, pc);
 
       pc.onicecandidate = (event) => {
         if (event.candidate) {
-          log('Generated ICE candidate', { targetUuid, type: event.candidate.type });
           sendToPeer(targetUuid, 'ice-candidate', event.candidate);
         }
       };
 
-      pc.ontrack = (evt) => {
-        log('Received track', { targetUuid, kind: evt.track.kind });
-        createOrUpdateVideoContainer(targetUuid, evt.streams[0], false);
+      pc.ontrack = (event) => {
+        createVideoContainer(targetUuid, event.streams[0], false);
       };
 
-      // add local tracks
       if (localStream) {
         localStream.getTracks().forEach(track => {
           pc.addTrack(track, localStream);
-          log('Added local track', { targetUuid, kind: track.kind });
         });
+      }
+
+      if (createOffer) {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await sendToPeer(targetUuid, 'offer', offer);
       }
 
       return pc;
@@ -651,207 +764,89 @@
 
     async function handleSignalMessage(msg) {
       const { type, data, from } = msg;
-      log('Handling message', { type, from });
 
       try {
         switch (type) {
           case 'offer': {
-            const pc = createPeerConnection(from);
+            const pc = await createPeerConnection(from, false);
             await pc.setRemoteDescription(new RTCSessionDescription(data));
-            peers.get(from).hasRemoteDescription = true;
-            // Add queued ICE
-            const peerInfo = peers.get(from);
-            while (peerInfo.iceCandidates.length) {
-              await pc.addIceCandidate(peerInfo.iceCandidates.shift());
-            }
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             await sendToPeer(from, 'answer', answer);
             break;
           }
           case 'answer': {
-            const pi = peers.get(from);
-            if (!pi) return;
-            await pi.pc.setRemoteDescription(new RTCSessionDescription(data));
-            pi.hasRemoteDescription = true;
-            // Add queued ICE
-            while (pi.iceCandidates.length) {
-              await pi.pc.addIceCandidate(pi.iceCandidates.shift());
+            const pc = peers.get(from);
+            if (pc) {
+              await pc.setRemoteDescription(new RTCSessionDescription(data));
             }
             break;
           }
           case 'ice-candidate': {
-            const pi = peers.get(from);
-            if (!pi) return;
-            const candidate = new RTCIceCandidate(data);
-            if (!pi.hasRemoteDescription) {
-              pi.iceCandidates.push(candidate);
-            } else {
-              await pi.pc.addIceCandidate(candidate);
+            const pc = peers.get(from);
+            if (pc) {
+              await pc.addIceCandidate(new RTCIceCandidate(data));
             }
             break;
           }
         }
       } catch (err) {
-        log('Error handling message', { type, from, error: err.message });
+        console.error('Error handling signal:', err);
       }
     }
 
-    // =========================================================================
-    // VIDEO ELEMENTS + GRID LAYOUT
-    // =========================================================================
-    function createOrUpdateVideoContainer(uuid, stream, isLocal) {
-      let peerInfo = peers.get(uuid);
-      if (!peerInfo && isLocal) {
-        peerInfo = {
-          pc: null,
-          iceCandidates: [],
-          hasRemoteDescription: false,
-          container: null,
-          avatarOverlayElem: null
-        };
-        peers.set(uuid, peerInfo);
-      }
-      if (!peerInfo.container) {
-        // create container
-        const container = document.createElement('div');
+    function createVideoContainer(uuid, stream, isLocal) {
+      let container = document.getElementById(`video-${uuid}`);
+      
+      if (!container) {
+        container = document.createElement('div');
         container.className = 'videoContainer';
         container.id = `video-${uuid}`;
 
-        const vid = document.createElement('video');
-        vid.autoplay = true;
-        vid.playsInline = true;
-        if (isLocal) {
-          vid.muted = true;
-        }
-        vid.onloadedmetadata = () => {
-          log('Video metadata loaded', uuid);
-          vid.play().catch(e => log('Video play error', e.message));
-        };
+        const video = document.createElement('video');
+        video.autoplay = true;
+        video.playsInline = true;
+        if (isLocal) video.muted = true;
 
         const label = document.createElement('div');
         label.className = 'peerId';
-        label.textContent = isLocal ? `${uuid} (You)` : uuid;
+        const user = users.find(u => u.name === uuid);
+        label.textContent = user ? `${user.emoji} ${uuid}` : uuid;
+        if (isLocal) label.textContent += ' (You)';
 
-        const overlay = document.createElement('div');
-        overlay.className = 'avatarOverlay';
-        const userObj = users.find(u => u.name === uuid);
-        const avImg = document.createElement('img');
-        avImg.src = userObj ? userObj.avatar : 'avatar-0.webp';
-        overlay.appendChild(avImg);
-
-        container.appendChild(vid);
+        container.appendChild(video);
         container.appendChild(label);
-        container.appendChild(overlay);
-        videoGrid.appendChild(container);
+        document.getElementById('videoGrid').appendChild(container);
 
-        peerInfo.container = container;
-        peerInfo.avatarOverlayElem = overlay;
-        adjustGridLayout(); // update columns whenever we add a new container
+        adjustGridLayout();
       }
 
-      const videoElem = peerInfo.container.querySelector('video');
-      if (videoElem.srcObject !== stream) {
-        videoElem.srcObject = stream;
+      const video = container.querySelector('video');
+      if (video.srcObject !== stream) {
+        video.srcObject = stream;
       }
     }
 
     function adjustGridLayout() {
-      if (manualGridOverride) return; // user slider is in control
-
-      const count = videoGrid.querySelectorAll('.videoContainer').length;
+      const grid = document.getElementById('videoGrid');
+      const count = grid.querySelectorAll('.videoContainer').length;
+      
       if (count <= 1) {
-        // single occupant => 100% width
-        videoGrid.style.gridTemplateColumns = '1fr';
+        grid.style.gridTemplateColumns = '1fr';
       } else if (count === 2) {
-        // two => 50% each
-        videoGrid.style.gridTemplateColumns = '1fr 1fr';
-      } else if (count === 3) {
-        // three => ~33% each
-        videoGrid.style.gridTemplateColumns = '1fr 1fr 1fr';
-      } else if (count === 4) {
-        // four => 2x2
-        videoGrid.style.gridTemplateColumns = '1fr 1fr';
-      } else if (count <= 6) {
-        // up to 6 => 3 columns
-        videoGrid.style.gridTemplateColumns = '1fr 1fr 1fr';
+        grid.style.gridTemplateColumns = '1fr 1fr';
+      } else if (count <= 4) {
+        grid.style.gridTemplateColumns = '1fr 1fr';
       } else {
-        // more => auto fill
-        videoGrid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(200px, 1fr))';
+        grid.style.gridTemplateColumns = '1fr 1fr 1fr';
       }
     }
 
-    // Show/hide avatar overlay
-    function showAvatarOverlay(uuid, show) {
-      const pi = peers.get(uuid);
-      if (!pi || !pi.avatarOverlayElem) return;
-      if (show) {
-        pi.avatarOverlayElem.classList.add('active');
-      } else {
-        pi.avatarOverlayElem.classList.remove('active');
-      }
-    }
-
-    // =========================================================================
-    // SIMPLE BANDWIDTH MONITOR
-    // =========================================================================
-    function monitorConnection() {
-      peers.forEach((peerInfo, uuid) => {
-        if (!peerInfo.pc) return;
-        const pc = peerInfo.pc;
-
-        pc.getStats(null).then(stats => {
-          stats.forEach(report => {
-            if (
-              report.type === 'inbound-rtp' &&
-              report.mediaType === 'video' &&
-              typeof report.framesPerSecond === 'number'
-            ) {
-              if (report.framesPerSecond < 5) {
-                showAvatarOverlay(uuid, true);
-              } else if (report.framesPerSecond > 10) {
-                showAvatarOverlay(uuid, false);
-              }
-            }
-          });
-        }).catch(err => {
-          log('getStats error', err.message);
-        });
-      });
-
-      if (isPolling) {
-        setTimeout(monitorConnection, 4000);
-      }
-    }
-
-    // =========================================================================
-    // GRID CONTROLS (SLIDER)
-    // =========================================================================
-    function setupGridControls() {
-      // Show slider value
-      colSlider.oninput = () => {
-        colValue.textContent = colSlider.value;
-        manualGridOverride = true;
-        // If slider=1 => 1 column, if=2 => 2 columns, etc.
-        videoGrid.style.gridTemplateColumns = `repeat(${colSlider.value}, 1fr)`;
-      };
-      // Reset to auto
-      resetGridBtn.onclick = () => {
-        manualGridOverride = false;
-        colSlider.value = 0;
-        colValue.textContent = '';
-        adjustGridLayout(); // revert to auto logic
-      };
-    }
-
-    // =========================================================================
-    // CLEANUP
-    // =========================================================================
+    // Cleanup on exit
     window.addEventListener('beforeunload', async () => {
       isPolling = false;
       if (myUuid) {
         try {
-          // Remove peer from active list
           const getResp = await fetch(SIGNALING_SERVER + '/latest', {
             headers: { 'X-Master-Key': JSONBIN_API_KEY }
           });
@@ -869,14 +864,11 @@
               body: JSON.stringify(record)
             });
           }
-          log(`User ${myUuid} left`);
         } catch (err) {
-          log('Cleanup error', err.message);
+          console.error('Cleanup error:', err);
         }
       }
-      peers.forEach(pi => {
-        if (pi.pc) pi.pc.close();
-      });
+      peers.forEach(pc => pc.close());
       if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
       }
