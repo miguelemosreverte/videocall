@@ -244,8 +244,8 @@
     // =========================================================================
     // Using JSONBin.io as a free HTTPS signaling service
     // This provides a simple JSON storage that works with GitHub Pages
-    const JSONBIN_API_KEY = '$2b$10$Zv3EKQl4lAuFjQKLgBwFYuGvQVmOZhYsvLqKFHgxqGvPyQxH3kKLe';
-    const JSONBIN_BIN_ID = '67627c5ce41b4d34e45e8a85';
+    const JSONBIN_API_KEY = '$2a$10$RWXovJmFo.sJ0tRptHowp.2vluFhdI6ds1R4fILpL.Bq09q4SZ6FS';
+    const JSONBIN_BIN_ID = '689cb5b0ae596e708fc94426';
     const SIGNALING_SERVER = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`
 
     // Hardcoded user list
@@ -325,7 +325,7 @@
         const resp = await fetch(SIGNALING_SERVER + '/latest', {
           method: 'GET',
           headers: {
-            'X-Access-Key': JSONBIN_API_KEY,
+            'X-Master-Key': JSONBIN_API_KEY,
             'Content-Type': 'application/json'
           }
         });
@@ -443,7 +443,7 @@
       try {
         // Get current data
         const getResp = await fetch(SIGNALING_SERVER + '/latest', {
-          headers: { 'X-Access-Key': JSONBIN_API_KEY }
+          headers: { 'X-Master-Key': JSONBIN_API_KEY }
         });
         const data = await getResp.json();
         const record = data.record || { peers: {}, messages: {} };
@@ -458,7 +458,7 @@
         const updateResp = await fetch(SIGNALING_SERVER, {
           method: 'PUT',
           headers: {
-            'X-Access-Key': JSONBIN_API_KEY,
+            'X-Master-Key': JSONBIN_API_KEY,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify(record)
@@ -526,7 +526,7 @@
     async function pollMessages() {
       try {
         const resp = await fetch(SIGNALING_SERVER + '/latest', {
-          headers: { 'X-Access-Key': JSONBIN_API_KEY }
+          headers: { 'X-Master-Key': JSONBIN_API_KEY }
         });
         if (!resp.ok) {
           throw new Error(`Poll failed: ${resp.status}`);
@@ -541,7 +541,7 @@
           await fetch(SIGNALING_SERVER, {
             method: 'PUT',
             headers: {
-              'X-Access-Key': JSONBIN_API_KEY,
+              'X-Master-Key': JSONBIN_API_KEY,
               'Content-Type': 'application/json'
             },
             body: JSON.stringify(record)
@@ -559,7 +559,7 @@
       try {
         // Get current data
         const getResp = await fetch(SIGNALING_SERVER + '/latest', {
-          headers: { 'X-Access-Key': JSONBIN_API_KEY }
+          headers: { 'X-Master-Key': JSONBIN_API_KEY }
         });
         const result = await getResp.json();
         const record = result.record || { messages: {} };
@@ -573,7 +573,7 @@
         const updateResp = await fetch(SIGNALING_SERVER, {
           method: 'PUT',
           headers: {
-            'X-Access-Key': JSONBIN_API_KEY,
+            'X-Master-Key': JSONBIN_API_KEY,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify(record)
@@ -853,7 +853,7 @@
         try {
           // Remove peer from active list
           const getResp = await fetch(SIGNALING_SERVER + '/latest', {
-            headers: { 'X-Access-Key': JSONBIN_API_KEY }
+            headers: { 'X-Master-Key': JSONBIN_API_KEY }
           });
           const data = await getResp.json();
           const record = data.record || {};
@@ -863,7 +863,7 @@
             await fetch(SIGNALING_SERVER, {
               method: 'PUT',
               headers: {
-                'X-Access-Key': JSONBIN_API_KEY,
+                'X-Master-Key': JSONBIN_API_KEY,
                 'Content-Type': 'application/json'
               },
               body: JSON.stringify(record)
