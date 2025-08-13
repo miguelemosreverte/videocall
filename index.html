@@ -687,6 +687,7 @@
     ];
 
     let myUuid = null;
+    let myRegistrationTime = null; // Track when we registered
     let localStream = null;
     const peers = new Map();
     const dataChannels = new Map();
@@ -694,6 +695,9 @@
     let electionInProgress = false;
     let electionTimeout = null;
     const peerLastSeen = new Map();
+    const peerRegistrationTimes = new Map(); // Track when each peer registered
+    const connectionAttempts = new Map(); // Track connection attempts
+    const connectionCooldown = new Map(); // Prevent rapid reconnection
     let isPolling = false;
     let lastKnownPeers = [];
     const processedMessages = new Set();
@@ -938,7 +942,8 @@
         }
         console.log('Registered with signaling server as:', uuid);
         console.log('Room state after registration:', record.peers);
-        return { uuid, registered: true, existingPeers: Object.keys(record.peers).filter(p => p !== uuid) };
+        myRegistrationTime = now; // Save our registration time
+        return { uuid, registered: true, existingPeers: Object.keys(record.peers).filter(p => p !== uuid), registrationTime: now };
       } catch (error) {
         console.log('Registration error - continuing in local mode');
         return { uuid, registered: false };
@@ -958,12 +963,29 @@
           lastKnownPeers = [...activePeers];
         }
         
-        // Create connections for new peers - JUST OFFER TO EVERYONE!
+        // Create connections for new peers - with cooldown check
         for (const peerUuid of activePeers) {
           if (peerUuid === myUuid) continue;
           
+          // Check if we're in cooldown for this peer
+          const cooldownUntil = connectionCooldown.get(peerUuid);
+          if (cooldownUntil && Date.now() < cooldownUntil) {
+            console.log(`Still in cooldown for ${peerUuid}, skipping...`);
+            continue;
+          }
+          
           if (!peers.has(peerUuid)) {
-            console.log(`New peer ${peerUuid} detected - creating offer`);
+            // Track connection attempts
+            const attempts = connectionAttempts.get(peerUuid) || 0;
+            if (attempts >= 3) {
+              console.log(`Max connection attempts reached for ${peerUuid}, waiting longer...`);
+              connectionCooldown.set(peerUuid, Date.now() + 15000); // 15 second cooldown after 3 failures
+              connectionAttempts.delete(peerUuid);
+              continue;
+            }
+            
+            console.log(`New peer ${peerUuid} detected - creating offer (attempt ${attempts + 1})`);
+            connectionAttempts.set(peerUuid, attempts + 1);
             await createPeerConnection(peerUuid, true);
           }
         }
@@ -1064,10 +1086,11 @@
     function setupDataChannel(channel, peerUuid) {
       channel.onopen = () => {
         console.log(`Data channel opened with ${peerUuid}`);
-        // Send initial hello with our UUID
+        // Send initial hello with our UUID and registration time
         sendDataMessage(peerUuid, {
           type: 'hello',
           from: myUuid,
+          registrationTime: myRegistrationTime,
           timestamp: Date.now()
         });
         
@@ -1113,7 +1136,11 @@
       
       switch(message.type) {
         case 'hello':
-          console.log(`Received hello from ${fromPeer}`);
+          console.log(`Received hello from ${fromPeer}, registered at ${message.registrationTime}`);
+          // Store their registration time
+          if (message.registrationTime) {
+            peerRegistrationTimes.set(fromPeer, message.registrationTime);
+          }
           break;
           
         case 'heartbeat':
@@ -1169,16 +1196,29 @@
       electionInProgress = true;
       console.log('Starting leader election...');
       
-      // Simple election: lowest UUID wins
+      // Election: oldest peer (by registration time) wins
       const activePeers = Array.from(dataChannels.keys()).filter(uuid => {
         const channel = dataChannels.get(uuid);
         return channel && channel.readyState === 'open';
       });
       
-      activePeers.push(myUuid);
-      activePeers.sort();
+      // Create list with registration times
+      const peersWithTime = [];
       
-      const newMaster = activePeers[0];
+      // Add ourselves
+      peersWithTime.push({ uuid: myUuid, time: myRegistrationTime || Date.now() });
+      
+      // Add other peers
+      activePeers.forEach(uuid => {
+        const regTime = peerRegistrationTimes.get(uuid);
+        peersWithTime.push({ uuid, time: regTime || Date.now() });
+      });
+      
+      // Sort by registration time (oldest first)
+      peersWithTime.sort((a, b) => a.time - b.time);
+      
+      const newMaster = peersWithTime[0].uuid;
+      console.log(`Election candidates:`, peersWithTime.map(p => `${p.uuid.substring(0, 8)} (registered: ${new Date(p.time).toLocaleTimeString()})`));
       
       // Announce election result
       setTimeout(() => {
@@ -1285,6 +1325,9 @@
       }
       dataChannels.delete(peerUuid);
       peerLastSeen.delete(peerUuid);
+      peerRegistrationTimes.delete(peerUuid);
+      connectionAttempts.delete(peerUuid);
+      connectionCooldown.delete(peerUuid);
       
       const container = document.getElementById(`video-${peerUuid}`);
       if (container) {
@@ -1414,13 +1457,24 @@
     
     async function createPeerConnection(targetUuid, createOffer) {
       if (peers.has(targetUuid)) {
-        console.log(`Already have connection to ${targetUuid}`);
-        return peers.get(targetUuid);
+        const existingPc = peers.get(targetUuid);
+        // Check if existing connection is still good
+        if (existingPc.connectionState === 'connected' || existingPc.connectionState === 'connecting') {
+          console.log(`Already have active connection to ${targetUuid}`);
+          return existingPc;
+        } else {
+          console.log(`Existing connection to ${targetUuid} is ${existingPc.connectionState}, replacing...`);
+          existingPc.close();
+          peers.delete(targetUuid);
+        }
       }
 
       console.log(`Creating peer connection to ${targetUuid}, will create offer: ${createOffer}`);
       const pc = new RTCPeerConnection(iceServers);
       peers.set(targetUuid, pc);
+      
+      // Mark connection as being established to prevent duplicates
+      pc.connectionStartTime = Date.now();
       
       // Create data channel for text protocol and chat
       if (createOffer) {
@@ -1439,30 +1493,65 @@
         console.log(`Connection state with ${targetUuid}: ${pc.connectionState}`);
         if (pc.connectionState === 'connected') {
           console.log(`✅ CONNECTED to ${targetUuid}`);
-        } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-          console.log(`❌ Connection to ${targetUuid} failed/disconnected - removing`);
+          // Reset connection attempts on success
+          connectionAttempts.delete(targetUuid);
+          connectionCooldown.delete(targetUuid);
+        } else if (pc.connectionState === 'failed') {
+          console.log(`❌ Connection to ${targetUuid} failed - will retry with cooldown`);
           // Clean up dead connection
           pc.close();
           peers.delete(targetUuid);
           dataChannels.delete(targetUuid);
-          peerLastSeen.delete(targetUuid);
           
-          // If this was the master, trigger new election
-          if (masterPeer === targetUuid) {
-            masterPeer = null;
-            triggerElectionDebounced();
-          }
+          // Set cooldown to prevent immediate reconnection
+          connectionCooldown.set(targetUuid, Date.now() + 5000); // 5 second cooldown
+          
           // Remove their video container
           const container = document.getElementById(`video-${targetUuid}`);
           if (container) {
             container.remove();
             adjustGridLayout();
           }
+        } else if (pc.connectionState === 'disconnected') {
+          // Don't immediately remove on disconnect - wait to see if it recovers
+          console.log(`⚠️ Connection to ${targetUuid} disconnected - monitoring...`);
+          setTimeout(() => {
+            const currentPc = peers.get(targetUuid);
+            if (currentPc && currentPc.connectionState === 'disconnected') {
+              console.log(`Connection to ${targetUuid} didn't recover - removing`);
+              currentPc.close();
+              peers.delete(targetUuid);
+              dataChannels.delete(targetUuid);
+              peerLastSeen.delete(targetUuid);
+              
+              // Set cooldown
+              connectionCooldown.set(targetUuid, Date.now() + 5000);
+              
+              // If this was the master, trigger new election
+              if (masterPeer === targetUuid) {
+                masterPeer = null;
+                triggerElectionDebounced();
+              }
+              
+              const container = document.getElementById(`video-${targetUuid}`);
+              if (container) {
+                container.remove();
+                adjustGridLayout();
+              }
+            }
+          }, 3000); // Wait 3 seconds to see if connection recovers
         }
       };
       
       pc.oniceconnectionstatechange = () => {
         console.log(`ICE state with ${targetUuid}: ${pc.iceConnectionState}`);
+        
+        // Handle ICE failure
+        if (pc.iceConnectionState === 'failed') {
+          console.log(`ICE failed with ${targetUuid}, triggering ICE restart...`);
+          // Try ICE restart
+          pc.restartIce();
+        }
       };
 
       pc.onicecandidate = (event) => {
@@ -1569,6 +1658,12 @@
             break;
           }
           case 'offer': {
+            // Check if we're in cooldown
+            const cooldown = connectionCooldown.get(from);
+            if (cooldown && Date.now() < cooldown) {
+              console.log(`Ignoring offer from ${from} - still in cooldown`);
+              break;
+            }
             let pc = peers.get(from);
             
             // If we have an existing connection, check if it's still alive
