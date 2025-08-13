@@ -821,17 +821,21 @@
         const now = Date.now();
         const wasNewPeer = !record.peers[uuid];
         
-        // Clean up VERY stale peers (older than 5 minutes - definitely gone)
-        const veryStale = [];
+        // Clean up stale peers (older than 1 minute - they should re-register by then)
+        const stalePeers = [];
         for (const [peer, timestamp] of Object.entries(record.peers)) {
-          if (now - timestamp > 300000 && peer !== uuid) { // 5 minutes
-            veryStale.push(peer);
+          if (now - timestamp > 60000 && peer !== uuid) { // 1 minute
+            stalePeers.push(peer);
             delete record.peers[peer];
-            delete record.messages[peer];
+            // IMPORTANT: Keep their message queue! They might have pending messages
+            // Only delete if queue is empty
+            if (record.messages[peer] && record.messages[peer].length === 0) {
+              delete record.messages[peer];
+            }
           }
         }
-        if (veryStale.length > 0) {
-          console.log('Cleaned up very stale peers:', veryStale);
+        if (stalePeers.length > 0) {
+          console.log('Cleaned up stale peers:', stalePeers);
         }
         
         // Log who's in the room
@@ -954,7 +958,7 @@
         } catch (error) {
           console.log('Polling error:', error.message);
         }
-      }, 2000); // Poll every 2 seconds for signaling (faster for better reliability)
+      }, 1500); // Poll every 1.5 seconds for signaling (more aggressive for reliability)
     }
 
     async function sendToPeer(targetUuid, type, data) {
@@ -1680,8 +1684,11 @@
             }
             if (pc.signalingState !== 'have-local-offer') {
               console.log(`Ignoring answer from ${from} - not expecting answer (state: ${pc.signalingState})`);
+              // Don't break - might be duplicate, log it
+              console.log(`Current connection state: ${pc.connectionState}`);
               break;
             }
+            console.log(`Processing answer from ${from}`);
             try {
               await pc.setRemoteDescription(new RTCSessionDescription(data));
               
