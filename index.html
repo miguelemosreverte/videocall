@@ -817,17 +817,11 @@
         const wasNewPeer = !record.peers[uuid];
         
         // Clean up stale peers (older than 60 seconds)
-        const stalePeers = [];
-        for (const [peer, timestamp] of Object.entries(record.peers)) {
-          if (now - timestamp > 60000 && peer !== uuid) {
-            stalePeers.push(peer);
-            delete record.peers[peer];
-            delete record.messages[peer];
-          }
-        }
-        
-        if (stalePeers.length > 0) {
-          console.log('Cleaned up stale peers:', stalePeers);
+        // Don't clean up peers on registration - master handles cleanup via data channels
+        // Just log who's in the room
+        const currentPeers = Object.keys(record.peers).filter(p => p !== uuid);
+        if (currentPeers.length > 0) {
+          console.log('Current peers in room:', currentPeers);
         }
         
         // Update our timestamp
@@ -909,6 +903,8 @@
           const myMessages = record.messages?.[myUuid] || [];
           
           if (myMessages.length > 0) {
+            console.log(`Received ${myMessages.length} messages:`, myMessages.map(m => `${m.type} from ${m.from}`));
+            
             // Process messages
             for (const msg of myMessages) {
               await handleSignalMessage(msg);
