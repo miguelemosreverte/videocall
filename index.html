@@ -753,10 +753,15 @@
             // Only the peer with the lower UUID initiates the connection
             // This prevents duplicate connections
             const shouldInitiate = myUuid.localeCompare(peerUuid) < 0;
-            console.log(`New peer ${peerUuid} detected. Should initiate: ${shouldInitiate}`);
+            console.log(`New peer ${peerUuid} detected. myUuid="${myUuid}" vs peer="${peerUuid}", shouldInitiate=${shouldInitiate}`);
             
             if (shouldInitiate) {
+              console.log(`Initiating connection to ${peerUuid}`);
               await createPeerConnection(peerUuid, true);
+            } else {
+              // Create passive connection to be ready for incoming offer
+              console.log(`Creating passive connection for ${peerUuid}, waiting for their offer`);
+              await createPeerConnection(peerUuid, false);
             }
           }
         }
@@ -911,7 +916,8 @@
       const { type, data, from } = msg;
       
       // Create unique message ID to prevent duplicates
-      const msgId = `${from}-${type}-${JSON.stringify(data).substring(0, 50)}`;
+      const dataStr = data ? JSON.stringify(data).substring(0, 50) : '';
+      const msgId = `${from}-${type}-${dataStr}`;
       if (processedMessages.has(msgId)) {
         return; // Already processed this message
       }
