@@ -525,11 +525,13 @@
         const record = data.record || {};
         const now = Date.now();
         const activePeers = [];
+        console.log('Current peers in room:', record.peers);
         for (const [peer, timestamp] of Object.entries(record.peers || {})) {
           if (now - timestamp < 30000) {
             activePeers.push(peer);
           }
         }
+        console.log('Active peers:', activePeers);
         return activePeers;
       } catch (error) {
         console.log('Using local-only mode:', error.message);
@@ -640,7 +642,8 @@
         if (!updateResp.ok) {
           throw new Error(`Registration failed: ${updateResp.status}`);
         }
-        console.log('Registered with signaling server');
+        console.log('Registered with signaling server as:', uuid);
+        console.log('Room state after registration:', record.peers);
         return { uuid, registered: true };
       } catch (error) {
         console.log('Registration error - continuing in local mode');
@@ -657,8 +660,16 @@
         // Create connections for new peers
         for (const peerUuid of activePeers) {
           if (peerUuid === myUuid) continue;
-          if (myUuid < peerUuid && !peers.has(peerUuid)) {
-            await createPeerConnection(peerUuid, true);
+          
+          if (!peers.has(peerUuid)) {
+            // Only the peer with the lower UUID initiates the connection
+            // This prevents duplicate connections
+            const shouldInitiate = myUuid.localeCompare(peerUuid) < 0;
+            console.log(`Peer ${peerUuid} found. Should initiate: ${shouldInitiate}`);
+            
+            if (shouldInitiate) {
+              await createPeerConnection(peerUuid, true);
+            }
           }
         }
 
@@ -764,6 +775,7 @@
 
     async function handleSignalMessage(msg) {
       const { type, data, from } = msg;
+      console.log(`Received ${type} from ${from}`);
 
       try {
         switch (type) {
