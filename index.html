@@ -1827,27 +1827,38 @@
           videoHeight: video.videoHeight
         });
         
-        // Ensure video plays after setting stream
-        video.play().then(() => {
-          console.log(`Video playing for ${uuid}`);
-          // Check dimensions after playing
-          setTimeout(() => {
-            console.log(`Video dimensions for ${uuid}: ${video.videoWidth}x${video.videoHeight}`);
-            if (video.videoWidth === 0 || video.videoHeight === 0) {
-              console.error(`WARNING: Video has no dimensions for ${uuid}, checking stream...`);
-              const videoTrack = stream.getVideoTracks()[0];
-              if (videoTrack) {
-                console.log(`Video track settings:`, videoTrack.getSettings());
-                console.log(`Video track state: enabled=${videoTrack.enabled}, muted=${videoTrack.muted}, readyState=${videoTrack.readyState}`);
+        // Force immediate play attempt
+        console.log(`Attempting to play video for ${uuid}`);
+        const playPromise = video.play();
+        
+        if (playPromise !== undefined) {
+          playPromise.then(() => {
+            console.log(`✅ Video playing for ${uuid}`);
+            // Check dimensions after playing
+            setTimeout(() => {
+              console.log(`Video dimensions for ${uuid}: ${video.videoWidth}x${video.videoHeight}`);
+              if (video.videoWidth === 0 || video.videoHeight === 0) {
+                console.error(`WARNING: Video has no dimensions for ${uuid}, checking stream...`);
+                const videoTrack = stream.getVideoTracks()[0];
+                if (videoTrack) {
+                  console.log(`Video track settings:`, videoTrack.getSettings());
+                  console.log(`Video track state: enabled=${videoTrack.enabled}, muted=${videoTrack.muted}, readyState=${videoTrack.readyState}`);
+                }
               }
-            }
-          }, 1000);
-        }).catch(err => {
-          console.error(`Error playing video for ${uuid}:`, err);
-          // Try playing muted if autoplay was blocked
-          video.muted = true;
-          video.play().catch(e => console.error('Still cannot play:', e));
-        });
+            }, 2000);
+          }).catch(err => {
+            console.error(`❌ Error playing video for ${uuid}:`, err.name, err.message);
+            // Try playing muted if autoplay was blocked
+            video.muted = true;
+            console.log(`Retrying with muted for ${uuid}`);
+            video.play().then(() => {
+              console.log(`✅ Video playing muted for ${uuid}`);
+              setTimeout(() => {
+                console.log(`Muted video dimensions for ${uuid}: ${video.videoWidth}x${video.videoHeight}`);
+              }, 2000);
+            }).catch(e => console.error(`❌ Still cannot play for ${uuid}:`, e.name, e.message));
+          });
+        }
       }
     }
     
