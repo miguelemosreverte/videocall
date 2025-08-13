@@ -595,7 +595,7 @@
         });
 
         // Register with signaling
-        await registerPeer(myUuid);
+        const registration = await registerPeer(myUuid);
 
         // Switch to video view
         document.querySelector('.container').style.display = 'none';
@@ -609,6 +609,19 @@
 
         // Start polling for peers
         isPolling = true;
+        
+        // Connect to existing peers in the room
+        if (registration.existingPeers && registration.existingPeers.length > 0) {
+          console.log('Found existing peers in room:', registration.existingPeers);
+          for (const peer of registration.existingPeers) {
+            const shouldInitiate = myUuid.localeCompare(peer) < 0;
+            if (shouldInitiate) {
+              console.log(`Initiating connection to existing peer: ${peer}`);
+              await createPeerConnection(peer, true);
+            }
+          }
+        }
+        
         pollLoop();
         
         // Start heartbeat to keep registration alive
@@ -616,7 +629,18 @@
           if (myUuid && isPolling) {
             registerPeer(myUuid);
           }
-        }, 20000); // Update every 20 seconds (before 30s timeout)
+        }, 20000); // Update every 20 seconds
+        
+        // Ping connected peers periodically
+        setInterval(async () => {
+          if (myUuid && isPolling) {
+            for (const [peerUuid, pc] of peers) {
+              if (pc.connectionState === 'connected') {
+                await sendToPeer(peerUuid, 'ping', { timestamp: Date.now() });
+              }
+            }
+          }
+        }, 30000); // Ping every 30 seconds
 
       } catch (err) {
         document.getElementById('errorMessage').textContent = 
@@ -633,9 +657,46 @@
         const record = data.record || { peers: {}, messages: {} };
         
         record.peers = record.peers || {};
-        record.peers[uuid] = Date.now();
         record.messages = record.messages || {};
-        record.messages[uuid] = [];
+        
+        const now = Date.now();
+        const wasNewPeer = !record.peers[uuid];
+        
+        // Clean up stale peers (older than 60 seconds)
+        const stalePeers = [];
+        for (const [peer, timestamp] of Object.entries(record.peers)) {
+          if (now - timestamp > 60000 && peer !== uuid) {
+            stalePeers.push(peer);
+            delete record.peers[peer];
+            delete record.messages[peer];
+          }
+        }
+        
+        if (stalePeers.length > 0) {
+          console.log('Cleaned up stale peers:', stalePeers);
+        }
+        
+        // Update our timestamp
+        record.peers[uuid] = now;
+        
+        // Initialize our message queue if needed
+        if (!record.messages[uuid]) {
+          record.messages[uuid] = [];
+        }
+        
+        // If we're a new peer, send enter event to all existing peers
+        if (wasNewPeer) {
+          const existingPeers = Object.keys(record.peers).filter(p => p !== uuid);
+          for (const peer of existingPeers) {
+            record.messages[peer] = record.messages[peer] || [];
+            record.messages[peer].push({
+              type: 'peer-entered',
+              from: uuid,
+              timestamp: now
+            });
+          }
+          console.log('Sending enter event to existing peers:', existingPeers);
+        }
         
         const updateResp = await fetch(SIGNALING_SERVER, {
           method: 'PUT',
@@ -651,7 +712,7 @@
         }
         console.log('Registered with signaling server as:', uuid);
         console.log('Room state after registration:', record.peers);
-        return { uuid, registered: true };
+        return { uuid, registered: true, existingPeers: Object.keys(record.peers).filter(p => p !== uuid) };
       } catch (error) {
         console.log('Registration error - continuing in local mode');
         return { uuid, registered: false };
@@ -786,6 +847,17 @@
 
       try {
         switch (type) {
+          case 'peer-entered': {
+            // A new peer joined, we should connect to them if we're the initiator
+            if (!peers.has(from)) {
+              const shouldInitiate = myUuid.localeCompare(from) < 0;
+              console.log(`New peer ${from} entered. Should initiate: ${shouldInitiate}`);
+              if (shouldInitiate) {
+                await createPeerConnection(from, true);
+              }
+            }
+            break;
+          }
           case 'offer': {
             const pc = await createPeerConnection(from, false);
             await pc.setRemoteDescription(new RTCSessionDescription(data));
@@ -806,6 +878,16 @@
             if (pc) {
               await pc.addIceCandidate(new RTCIceCandidate(data));
             }
+            break;
+          }
+          case 'ping': {
+            // Respond to ping with pong
+            await sendToPeer(from, 'pong', { timestamp: Date.now() });
+            break;
+          }
+          case 'pong': {
+            // Mark peer as alive
+            console.log(`Peer ${from} is alive (pong received)`);
             break;
           }
         }
