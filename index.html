@@ -473,7 +473,12 @@
     // =========================================================================
     const JSONBIN_API_KEY = '$2a$10$RWXovJmFo.sJ0tRptHowp.2vluFhdI6ds1R4fILpL.Bq09q4SZ6FS';
     const JSONBIN_BIN_ID = '689cb5b0ae596e708fc94426';
-    const SIGNALING_SERVER = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
+    
+    // Use CORS proxy for GitHub Pages, direct access for localhost
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const SIGNALING_SERVER = isLocalhost 
+      ? `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`
+      : `https://corsproxy.io/?https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
 
     const users = [
       { name: "Miguel", avatar: "avatar-0.webp", emoji: "🦔" },
@@ -514,9 +519,9 @@
       try {
         const resp = await fetch(SIGNALING_SERVER + '/latest', {
           method: 'GET',
+          mode: 'cors',
           headers: {
-            'X-Master-Key': JSONBIN_API_KEY,
-            'Content-Type': 'application/json'
+            'X-Master-Key': JSONBIN_API_KEY
           }
         });
         if (!resp.ok) {
