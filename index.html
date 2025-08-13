@@ -485,6 +485,7 @@
     let localStream = null;
     const peers = new Map();
     let isPolling = false;
+    let lastKnownPeers = [];
 
     const iceServers = {
       iceServers: [
@@ -525,13 +526,15 @@
         const record = data.record || {};
         const now = Date.now();
         const activePeers = [];
-        console.log('Current peers in room:', record.peers);
-        for (const [peer, timestamp] of Object.entries(record.peers || {})) {
-          if (now - timestamp < 30000) {
-            activePeers.push(peer);
+        // Only log peers if there's a change
+        const peerCount = Object.keys(record.peers || {}).length;
+        if (peerCount > 0) {
+          for (const [peer, timestamp] of Object.entries(record.peers || {})) {
+            if (now - timestamp < 30000) {
+              activePeers.push(peer);
+            }
           }
         }
-        console.log('Active peers:', activePeers);
         return activePeers;
       } catch (error) {
         console.log('Using local-only mode:', error.message);
@@ -643,7 +646,7 @@
               }
             }
           }
-        }, 30000); // Ping every 30 seconds
+        }, 120000); // Ping every 2 minutes
 
       } catch (err) {
         document.getElementById('errorMessage').textContent = 
@@ -728,6 +731,13 @@
       try {
         const activePeers = await fetchActivePeers();
         
+        // Only log if peers changed
+        const peersChanged = JSON.stringify(activePeers.sort()) !== JSON.stringify(lastKnownPeers.sort());
+        if (peersChanged) {
+          console.log('Active peers in room:', activePeers);
+          lastKnownPeers = [...activePeers];
+        }
+        
         // Create connections for new peers
         for (const peerUuid of activePeers) {
           if (peerUuid === myUuid) continue;
@@ -736,7 +746,7 @@
             // Only the peer with the lower UUID initiates the connection
             // This prevents duplicate connections
             const shouldInitiate = myUuid.localeCompare(peerUuid) < 0;
-            console.log(`Peer ${peerUuid} found. Should initiate: ${shouldInitiate}`);
+            console.log(`New peer ${peerUuid} detected. Should initiate: ${shouldInitiate}`);
             
             if (shouldInitiate) {
               await createPeerConnection(peerUuid, true);
@@ -852,7 +862,10 @@
 
     async function handleSignalMessage(msg) {
       const { type, data, from } = msg;
-      console.log(`Received ${type} from ${from}`);
+      // Only log non-ping/pong messages to reduce spam
+      if (type !== 'ping' && type !== 'pong') {
+        console.log(`Received ${type} from ${from}`);
+      }
 
       try {
         switch (type) {
@@ -901,13 +914,12 @@
             break;
           }
           case 'ping': {
-            // Respond to ping with pong
+            // Respond to ping with pong (silently)
             await sendToPeer(from, 'pong', { timestamp: Date.now() });
             break;
           }
           case 'pong': {
-            // Mark peer as alive
-            console.log(`Peer ${from} is alive (pong received)`);
+            // Mark peer as alive (silently - no log to reduce spam)
             break;
           }
         }
