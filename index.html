@@ -909,6 +909,20 @@
       console.log(`Creating peer connection to ${targetUuid}, will create offer: ${createOffer}`);
       const pc = new RTCPeerConnection(iceServers);
       peers.set(targetUuid, pc);
+      
+      // Monitor connection state
+      pc.onconnectionstatechange = () => {
+        console.log(`Connection state with ${targetUuid}: ${pc.connectionState}`);
+        if (pc.connectionState === 'connected') {
+          console.log(`✅ CONNECTED to ${targetUuid}`);
+        } else if (pc.connectionState === 'failed') {
+          console.log(`❌ FAILED connection to ${targetUuid}`);
+        }
+      };
+      
+      pc.oniceconnectionstatechange = () => {
+        console.log(`ICE state with ${targetUuid}: ${pc.iceConnectionState}`);
+      };
 
       pc.onicecandidate = (event) => {
         if (event.candidate) {
@@ -933,8 +947,16 @@
       };
 
       pc.ontrack = (event) => {
-        console.log(`Received ${event.track.kind} track from ${targetUuid}`);
+        console.log(`Received ${event.track.kind} track from ${targetUuid}, enabled: ${event.track.enabled}, muted: ${event.track.muted}`);
         createVideoContainer(targetUuid, event.streams[0], false);
+        
+        // Debug: check track state
+        event.track.onunmute = () => {
+          console.log(`Track ${event.track.kind} from ${targetUuid} unmuted`);
+        };
+        event.track.onmute = () => {
+          console.log(`Track ${event.track.kind} from ${targetUuid} muted`);
+        };
       };
 
       if (localStream) {
@@ -997,30 +1019,45 @@
             break;
           }
           case 'offer': {
-            const pc = await createPeerConnection(from, false);
-            await pc.setRemoteDescription(new RTCSessionDescription(data));
+            let pc = peers.get(from);
             
-            // Apply any pending ICE candidates
-            if (pc.pendingCandidates && pc.pendingCandidates.length > 0) {
-              console.log(`Applying ${pc.pendingCandidates.length} pending ICE candidates for ${from}`);
-              for (const candidate of pc.pendingCandidates) {
-                try {
-                  await pc.addIceCandidate(new RTCIceCandidate(candidate));
-                } catch (err) {
-                  console.error('Error adding pending ICE candidate:', err);
-                }
-              }
-              pc.pendingCandidates = [];
+            // If we already have a connection and it's stable, ignore this offer
+            if (pc && pc.signalingState === 'stable' && pc.remoteDescription) {
+              console.log(`Ignoring offer from ${from} - already have stable connection`);
+              break;
             }
             
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            await sendToPeer(from, 'answer', answer);
+            // Create connection if we don't have one
+            if (!pc) {
+              pc = await createPeerConnection(from, false);
+            }
+            
+            // Only set remote description if we're in the right state
+            if (pc.signalingState === 'stable' || pc.signalingState === 'have-local-offer') {
+              await pc.setRemoteDescription(new RTCSessionDescription(data));
+              
+              // Apply any pending ICE candidates
+              if (pc.pendingCandidates && pc.pendingCandidates.length > 0) {
+                console.log(`Applying ${pc.pendingCandidates.length} pending ICE candidates for ${from}`);
+                for (const candidate of pc.pendingCandidates) {
+                  try {
+                    await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                  } catch (err) {
+                    console.error('Error adding pending ICE candidate:', err);
+                  }
+                }
+                pc.pendingCandidates = [];
+              }
+              
+              const answer = await pc.createAnswer();
+              await pc.setLocalDescription(answer);
+              await sendToPeer(from, 'answer', answer);
+            }
             break;
           }
           case 'answer': {
             const pc = peers.get(from);
-            if (pc) {
+            if (pc && pc.signalingState === 'have-local-offer') {
               await pc.setRemoteDescription(new RTCSessionDescription(data));
               
               // Apply any pending ICE candidates
