@@ -826,6 +826,10 @@
       const focusedContainer = document.getElementById(`video-${focusedUser}`);
       const isPortrait = window.innerHeight > window.innerWidth;
       
+      console.log('Focus layout - Total containers:', containers.length);
+      console.log('Focus layout - Focused user:', focusedUser);
+      console.log('Focus layout - Container IDs:', Array.from(containers).map(c => c.id));
+      
       containers.forEach(container => {
         container.classList.remove('focused', 'minimized', 'thumbnail');
         container.style.position = '';
@@ -842,8 +846,10 @@
       if (focusedContainer) {
         focusedContainer.classList.add('focused');
         
-        // Create thumbnail strip for other users
+        // Create thumbnail strip for ALL other users (including yourself)
         const otherContainers = Array.from(containers).filter(c => c !== focusedContainer);
+        console.log('Other containers for thumbnails:', otherContainers.map(c => c.id));
+        
         if (otherContainers.length > 0) {
           const thumbnailStrip = document.createElement('div');
           thumbnailStrip.className = 'thumbnail-strip';
