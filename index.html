@@ -759,9 +759,8 @@
               console.log(`Initiating connection to ${peerUuid}`);
               await createPeerConnection(peerUuid, true);
             } else {
-              // Create passive connection to be ready for incoming offer
-              console.log(`Creating passive connection for ${peerUuid}, waiting for their offer`);
-              await createPeerConnection(peerUuid, false);
+              // Don't create passive connection here - wait for peer-entered or offer
+              console.log(`Waiting for ${peerUuid} to initiate connection`);
             }
           }
         }
@@ -956,6 +955,20 @@
           case 'offer': {
             const pc = await createPeerConnection(from, false);
             await pc.setRemoteDescription(new RTCSessionDescription(data));
+            
+            // Apply any pending ICE candidates
+            if (pc.pendingCandidates && pc.pendingCandidates.length > 0) {
+              console.log(`Applying ${pc.pendingCandidates.length} pending ICE candidates for ${from}`);
+              for (const candidate of pc.pendingCandidates) {
+                try {
+                  await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                } catch (err) {
+                  console.error('Error adding pending ICE candidate:', err);
+                }
+              }
+              pc.pendingCandidates = [];
+            }
+            
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             await sendToPeer(from, 'answer', answer);
@@ -965,6 +978,19 @@
             const pc = peers.get(from);
             if (pc) {
               await pc.setRemoteDescription(new RTCSessionDescription(data));
+              
+              // Apply any pending ICE candidates
+              if (pc.pendingCandidates && pc.pendingCandidates.length > 0) {
+                console.log(`Applying ${pc.pendingCandidates.length} pending ICE candidates for ${from}`);
+                for (const candidate of pc.pendingCandidates) {
+                  try {
+                    await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                  } catch (err) {
+                    console.error('Error adding pending ICE candidate:', err);
+                  }
+                }
+                pc.pendingCandidates = [];
+              }
             }
             break;
           }
@@ -982,14 +1008,32 @@
             break;
           }
           case 'ice-candidates-batch': {
-            const pc = peers.get(from);
+            let pc = peers.get(from);
+            if (!pc) {
+              // Create connection if we don't have one yet
+              console.log(`Creating peer connection for ${from} due to ICE candidates`);
+              pc = await createPeerConnection(from, false);
+            }
+            
             if (pc && Array.isArray(data)) {
               console.log(`Received ${data.length} batched ICE candidates from ${from}`);
-              for (const candidate of data) {
-                try {
-                  await pc.addIceCandidate(new RTCIceCandidate(candidate));
-                } catch (err) {
-                  console.error('Error adding ICE candidate:', err);
+              
+              // Check if remote description is set
+              if (!pc.remoteDescription) {
+                console.log(`Queueing ICE candidates for ${from} - waiting for remote description`);
+                // Store candidates to add later
+                if (!pc.pendingCandidates) {
+                  pc.pendingCandidates = [];
+                }
+                pc.pendingCandidates.push(...data);
+              } else {
+                // Add candidates immediately
+                for (const candidate of data) {
+                  try {
+                    await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                  } catch (err) {
+                    console.error('Error adding ICE candidate:', err);
+                  }
                 }
               }
             }
