@@ -1425,14 +1425,23 @@
         }
       };
 
+      // Store the remote stream to ensure we use the same one
+      let remoteStream = new MediaStream();
+      
       pc.ontrack = (event) => {
         console.log(`Received ${event.track.kind} track from ${targetUuid}, enabled: ${event.track.enabled}, muted: ${event.track.muted}`);
-        const stream = event.streams[0];
-        console.log(`Stream from ${targetUuid} has ${stream.getTracks().length} tracks:`, 
-          stream.getTracks().map(t => `${t.kind}:${t.enabled}:${t.readyState}`).join(', '));
         
-        // Create or update the video container
-        createVideoContainer(targetUuid, stream, false);
+        // Add track to our persistent stream
+        remoteStream.addTrack(event.track);
+        
+        console.log(`Remote stream for ${targetUuid} now has ${remoteStream.getTracks().length} tracks:`, 
+          remoteStream.getTracks().map(t => `${t.kind}:${t.enabled}:${t.readyState}`).join(', '));
+        
+        // Only create/update video container when we have both audio and video
+        if (remoteStream.getVideoTracks().length > 0 && remoteStream.getAudioTracks().length > 0) {
+          console.log(`Stream complete for ${targetUuid}, creating video container`);
+          createVideoContainer(targetUuid, remoteStream, false);
+        }
         
         // Debug: check track state
         event.track.onunmute = () => {
@@ -1746,22 +1755,9 @@
     function createVideoContainer(uuid, stream, isLocal) {
       let container = document.getElementById(`video-${uuid}`);
       
-      // If container exists, check if we need to update the stream
+      // If container already exists, just return (shouldn't happen with new logic)
       if (container) {
-        const video = container.querySelector('video');
-        if (video) {
-          // Only update if the new stream has more tracks than the current one
-          const currentStream = video.srcObject;
-          if (!currentStream || stream.getTracks().length > currentStream.getTracks().length) {
-            console.log(`Updating video stream for ${uuid}: ${currentStream ? currentStream.getTracks().length : 0} -> ${stream.getTracks().length} tracks`);
-            video.srcObject = stream;
-            video.play().catch(e => {
-              console.error(`Error playing updated video for ${uuid}:`, e);
-              video.muted = true;
-              video.play();
-            });
-          }
-        }
+        console.log(`Container already exists for ${uuid}, skipping`);
         return;
       }
       
