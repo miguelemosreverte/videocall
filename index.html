@@ -1425,23 +1425,9 @@
         }
       };
 
-      // Store the remote stream to ensure we use the same one
-      let remoteStream = new MediaStream();
-      
       pc.ontrack = (event) => {
-        console.log(`Received ${event.track.kind} track from ${targetUuid}, enabled: ${event.track.enabled}, muted: ${event.track.muted}`);
-        
-        // Add track to our persistent stream
-        remoteStream.addTrack(event.track);
-        
-        console.log(`Remote stream for ${targetUuid} now has ${remoteStream.getTracks().length} tracks:`, 
-          remoteStream.getTracks().map(t => `${t.kind}:${t.enabled}:${t.readyState}`).join(', '));
-        
-        // Only create/update video container when we have both audio and video
-        if (remoteStream.getVideoTracks().length > 0 && remoteStream.getAudioTracks().length > 0) {
-          console.log(`Stream complete for ${targetUuid}, creating video container`);
-          createVideoContainer(targetUuid, remoteStream, false);
-        }
+        console.log(`Received ${event.track.kind} track from ${targetUuid}`);
+        createVideoContainer(targetUuid, event.streams[0], false);
         
         // Debug: check track state
         event.track.onunmute = () => {
@@ -1755,12 +1741,6 @@
     function createVideoContainer(uuid, stream, isLocal) {
       let container = document.getElementById(`video-${uuid}`);
       
-      // If container already exists, just return (shouldn't happen with new logic)
-      if (container) {
-        console.log(`Container already exists for ${uuid}, skipping`);
-        return;
-      }
-      
       if (!container) {
         container = document.createElement('div');
         container.className = 'videoContainer';
@@ -1833,70 +1813,11 @@
       const video = container.querySelector('video');
       if (video.srcObject !== stream) {
         video.srcObject = stream;
-        
-        // Debug video element
-        console.log(`Setting video for ${uuid}:`, {
-          hasStream: !!stream,
-          trackCount: stream.getTracks().length,
-          videoTracks: stream.getVideoTracks().length,
-          audioTracks: stream.getAudioTracks().length,
-          videoWidth: video.videoWidth,
-          videoHeight: video.videoHeight
+        video.play().catch(e => {
+          console.log(`Autoplay blocked for ${uuid}, playing muted`);
+          video.muted = true;
+          video.play();
         });
-        
-        // Force immediate play attempt
-        console.log(`Attempting to play video for ${uuid}`);
-        
-        // Set a timeout as fallback in case play() never resolves
-        setTimeout(() => {
-          console.log(`Checking video state for ${uuid} (fallback):`, {
-            paused: video.paused,
-            readyState: video.readyState,
-            networkState: video.networkState,
-            videoWidth: video.videoWidth,
-            videoHeight: video.videoHeight,
-            currentTime: video.currentTime
-          });
-          
-          if (video.paused) {
-            console.log(`Video is paused for ${uuid}, forcing play`);
-            video.muted = true;
-            video.play().catch(e => console.error(`Force play failed for ${uuid}:`, e));
-          }
-        }, 3000);
-        
-        const playPromise = video.play();
-        
-        if (playPromise !== undefined) {
-          playPromise.then(() => {
-            console.log(`✅ Video playing for ${uuid}`);
-            // Check dimensions after playing
-            setTimeout(() => {
-              console.log(`Video dimensions for ${uuid}: ${video.videoWidth}x${video.videoHeight}`);
-              if (video.videoWidth === 0 || video.videoHeight === 0) {
-                console.error(`WARNING: Video has no dimensions for ${uuid}, checking stream...`);
-                const videoTrack = stream.getVideoTracks()[0];
-                if (videoTrack) {
-                  console.log(`Video track settings:`, videoTrack.getSettings());
-                  console.log(`Video track state: enabled=${videoTrack.enabled}, muted=${videoTrack.muted}, readyState=${videoTrack.readyState}`);
-                }
-              }
-            }, 2000);
-          }).catch(err => {
-            console.error(`❌ Error playing video for ${uuid}:`, err.name, err.message);
-            // Try playing muted if autoplay was blocked
-            video.muted = true;
-            console.log(`Retrying with muted for ${uuid}`);
-            video.play().then(() => {
-              console.log(`✅ Video playing muted for ${uuid}`);
-              setTimeout(() => {
-                console.log(`Muted video dimensions for ${uuid}: ${video.videoWidth}x${video.videoHeight}`);
-              }, 2000);
-            }).catch(e => console.error(`❌ Still cannot play for ${uuid}:`, e.name, e.message));
-          });
-        } else {
-          console.error(`play() returned undefined for ${uuid}`);
-        }
       }
     }
     
