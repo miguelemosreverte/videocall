@@ -790,14 +790,25 @@
 
       try {
         // Get camera/mic with specific constraints
-        localStream = await navigator.mediaDevices.getUserMedia({ 
-          video: {
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            facingMode: 'user'
-          }, 
-          audio: true 
-        });
+        console.log('Requesting camera and microphone access...');
+        try {
+          localStream = await navigator.mediaDevices.getUserMedia({ 
+            video: {
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              facingMode: 'user'
+            }, 
+            audio: true 
+          });
+        } catch (err) {
+          console.error('getUserMedia error:', err);
+          // Try with simpler constraints
+          console.log('Trying with simpler constraints...');
+          localStream = await navigator.mediaDevices.getUserMedia({ 
+            video: true, 
+            audio: true 
+          });
+        }
         
         // Debug local stream
         console.log('Local stream obtained:', localStream);
@@ -1822,6 +1833,14 @@
           // Check dimensions after playing
           setTimeout(() => {
             console.log(`Video dimensions for ${uuid}: ${video.videoWidth}x${video.videoHeight}`);
+            if (video.videoWidth === 0 || video.videoHeight === 0) {
+              console.error(`WARNING: Video has no dimensions for ${uuid}, checking stream...`);
+              const videoTrack = stream.getVideoTracks()[0];
+              if (videoTrack) {
+                console.log(`Video track settings:`, videoTrack.getSettings());
+                console.log(`Video track state: enabled=${videoTrack.enabled}, muted=${videoTrack.muted}, readyState=${videoTrack.readyState}`);
+              }
+            }
           }, 1000);
         }).catch(err => {
           console.error(`Error playing video for ${uuid}:`, err);
