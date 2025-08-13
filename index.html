@@ -189,30 +189,37 @@
     
     .video-controls {
       position: absolute;
-      bottom: 15px;
+      bottom: 60px;
       right: 15px;
       display: flex;
       gap: 10px;
+      z-index: 10;
     }
     
     .control-btn {
-      background: rgba(0,0,0,0.7);
+      background: rgba(0,0,0,0.8);
       color: white;
-      border: none;
-      width: 40px;
-      height: 40px;
+      border: 2px solid rgba(255,255,255,0.3);
+      width: 45px;
+      height: 45px;
       border-radius: 50%;
       cursor: pointer;
-      font-size: 18px;
-      transition: background 0.3s;
+      font-size: 20px;
+      transition: all 0.3s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
     
     .control-btn:hover {
-      background: rgba(0,0,0,0.9);
+      background: rgba(0,0,0,1);
+      border-color: rgba(255,255,255,0.6);
+      transform: scale(1.1);
     }
     
     .control-btn.active {
       background: #dc3545;
+      border-color: #dc3545;
     }
   </style>
 </head>
@@ -738,6 +745,8 @@
         // If we're a new peer, send enter event to all existing peers
         if (wasNewPeer) {
           const existingPeers = Object.keys(record.peers).filter(p => p !== uuid);
+          
+          // Send direct peer-entered to each existing peer
           for (const peer of existingPeers) {
             record.messages[peer] = record.messages[peer] || [];
             record.messages[peer].push({
@@ -746,7 +755,19 @@
               timestamp: now
             });
           }
-          console.log('Sending enter event to existing peers:', existingPeers);
+          
+          // Also send a flood message asking peers to announce themselves
+          for (const peer of existingPeers) {
+            record.messages[peer].push({
+              type: 'announce-peers',
+              from: uuid,
+              ttl: existingPeers.length + 1,
+              origin: uuid,
+              timestamp: now
+            });
+          }
+          
+          console.log('Sending enter event and announce request to existing peers:', existingPeers);
         }
         
         const updateResp = await fetch(SIGNALING_SERVER, {
@@ -929,11 +950,15 @@
       };
 
       pc.ontrack = (event) => {
+        console.log(`Received ${event.track.kind} track from ${targetUuid}`);
         createVideoContainer(targetUuid, event.streams[0], false);
       };
 
       if (localStream) {
-        localStream.getTracks().forEach(track => {
+        const tracks = localStream.getTracks();
+        console.log(`Adding ${tracks.length} tracks to connection for ${targetUuid}:`, 
+          tracks.map(t => `${t.kind}:${t.enabled}`).join(', '));
+        tracks.forEach(track => {
           pc.addTrack(track, localStream);
         });
       }
@@ -1091,6 +1116,56 @@
           }
           case 'pong': {
             // Mark peer as alive (silently - no log to reduce spam)
+            break;
+          }
+          case 'announce-peers': {
+            // Flood message to announce all known peers
+            const ttl = (data.ttl || 0) - 1;
+            const origin = data.origin || from;
+            
+            if (ttl > 0 && origin !== myUuid) {
+              console.log(`Received announce-peers request from ${from} (origin: ${origin}, ttl: ${ttl})`);
+              
+              // Get all known peers
+              const knownPeers = Array.from(peers.keys());
+              knownPeers.push(myUuid); // Include ourselves
+              
+              // Send peer list to the origin
+              await sendToPeer(origin, 'peer-list', {
+                peers: knownPeers,
+                from: myUuid
+              });
+              
+              // Forward the announce request to other peers (flooding with TTL)
+              for (const peer of knownPeers) {
+                if (peer !== myUuid && peer !== from && peer !== origin) {
+                  await sendToPeer(peer, 'announce-peers', {
+                    ttl: ttl,
+                    origin: origin
+                  });
+                }
+              }
+            }
+            break;
+          }
+          case 'peer-list': {
+            // Received a list of peers from someone
+            console.log(`Received peer list from ${from}:`, data.peers);
+            
+            // Try to connect to any peers we don't know about
+            if (Array.isArray(data.peers)) {
+              for (const peer of data.peers) {
+                if (peer !== myUuid && !peers.has(peer)) {
+                  console.log(`Discovered new peer ${peer} via ${from}`);
+                  
+                  const shouldInitiate = myUuid.localeCompare(peer) < 0;
+                  if (shouldInitiate) {
+                    console.log(`Initiating connection to discovered peer: ${peer}`);
+                    await createPeerConnection(peer, true);
+                  }
+                }
+              }
+            }
             break;
           }
         }
