@@ -835,6 +835,11 @@
         await database.ref(`peers/${uuid}`).set({
           timestamp: now,
           name: uuid
+        }).catch(error => {
+          console.error('Firebase write error:', error);
+          console.error('Error code:', error.code);
+          console.error('Error message:', error.message);
+          throw error;
         });
         console.log('Successfully registered in Firebase');
         
