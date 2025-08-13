@@ -1582,7 +1582,20 @@
             
             // If we have an existing connection, check if it's still alive
             if (pc) {
-              if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
+              // Handle glare - both sent offers at same time
+              if (pc.signalingState === 'have-local-offer') {
+                // Use UUID comparison for tie-breaking
+                if (myUuid < from) {
+                  console.log(`Glare with ${from} - I win (${myUuid} < ${from}), ignoring their offer`);
+                  break;
+                } else {
+                  console.log(`Glare with ${from} - they win (${myUuid} > ${from}), rolling back my offer`);
+                  // Close and recreate connection
+                  pc.close();
+                  peers.delete(from);
+                  pc = null;
+                }
+              } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
                 console.log(`Replacing dead connection to ${from}`);
                 pc.close();
                 peers.delete(from);
@@ -1625,7 +1638,15 @@
           }
           case 'answer': {
             const pc = peers.get(from);
-            if (pc && pc.signalingState === 'have-local-offer') {
+            if (!pc) {
+              console.log(`Ignoring answer from ${from} - no peer connection`);
+              break;
+            }
+            if (pc.signalingState !== 'have-local-offer') {
+              console.log(`Ignoring answer from ${from} - not expecting answer (state: ${pc.signalingState})`);
+              break;
+            }
+            try {
               await pc.setRemoteDescription(new RTCSessionDescription(data));
               
               // Apply any pending ICE candidates
@@ -1640,6 +1661,8 @@
                 }
                 pc.pendingCandidates = [];
               }
+            } catch (err) {
+              console.error(`Failed to set answer from ${from}:`, err);
             }
             break;
           }
