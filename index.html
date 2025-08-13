@@ -1430,6 +1430,8 @@
         const stream = event.streams[0];
         console.log(`Stream from ${targetUuid} has ${stream.getTracks().length} tracks:`, 
           stream.getTracks().map(t => `${t.kind}:${t.enabled}:${t.readyState}`).join(', '));
+        
+        // Create or update the video container
         createVideoContainer(targetUuid, stream, false);
         
         // Debug: check track state
@@ -1829,6 +1831,25 @@
         
         // Force immediate play attempt
         console.log(`Attempting to play video for ${uuid}`);
+        
+        // Set a timeout as fallback in case play() never resolves
+        setTimeout(() => {
+          console.log(`Checking video state for ${uuid} (fallback):`, {
+            paused: video.paused,
+            readyState: video.readyState,
+            networkState: video.networkState,
+            videoWidth: video.videoWidth,
+            videoHeight: video.videoHeight,
+            currentTime: video.currentTime
+          });
+          
+          if (video.paused) {
+            console.log(`Video is paused for ${uuid}, forcing play`);
+            video.muted = true;
+            video.play().catch(e => console.error(`Force play failed for ${uuid}:`, e));
+          }
+        }, 3000);
+        
         const playPromise = video.play();
         
         if (playPromise !== undefined) {
@@ -1858,6 +1879,8 @@
               }, 2000);
             }).catch(e => console.error(`❌ Still cannot play for ${uuid}:`, e.name, e.message));
           });
+        } else {
+          console.error(`play() returned undefined for ${uuid}`);
         }
       }
     }
