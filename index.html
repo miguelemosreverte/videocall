@@ -641,7 +641,7 @@
       const containers = videoGrid.querySelectorAll('.videoContainer');
       const containerCount = containers.length;
       
-      // Reset all special classes
+      // Reset all special classes and make all containers visible
       containers.forEach(container => {
         container.classList.remove('focused', 'minimized', 'thumbnail');
         container.style.position = '';
@@ -651,11 +651,20 @@
         container.style.bottom = '';
         container.style.width = '';
         container.style.height = '';
+        container.style.zIndex = '';
+        container.style.display = 'block';
       });
       
-      // Remove thumbnail strip
+      // Remove thumbnail strip and move containers back to main grid
       const existingStrip = document.querySelector('.thumbnail-strip');
-      if (existingStrip) existingStrip.remove();
+      if (existingStrip) {
+        // Move any containers from strip back to main grid
+        const strippedContainers = existingStrip.querySelectorAll('.videoContainer');
+        strippedContainers.forEach(container => {
+          videoGrid.appendChild(container);
+        });
+        existingStrip.remove();
+      }
       
       if (isMobile) {
         setupMobileLayout(containers);
@@ -667,6 +676,12 @@
     function setupMobileLayout(containers) {
       const videoGrid = document.getElementById('videoGrid');
       const isPortrait = window.innerHeight > window.innerWidth;
+      
+      // Reset grid styles for mobile
+      videoGrid.style.display = 'block';
+      videoGrid.style.gridTemplateColumns = '';
+      videoGrid.style.gridTemplateRows = '';
+      videoGrid.style.gridGap = '';
       
       if (containers.length === 1) {
         // Just local user
@@ -693,10 +708,13 @@
         mainContainer.style.left = '10px';
         mainContainer.style.right = '10px';
         mainContainer.style.bottom = '10px';
+        mainContainer.style.width = '';
+        mainContainer.style.height = '';
       } else {
         // Multiple remote users - split the screen
         remoteContainers.forEach((container, index) => {
           container.style.position = 'fixed';
+          container.style.zIndex = '150';
           
           if (isPortrait) {
             // Split vertically
@@ -705,6 +723,7 @@
             container.style.left = '10px';
             container.style.right = '10px';
             container.style.height = height;
+            container.style.width = '';
           } else {
             // Split horizontally (landscape)
             const width = `calc(${100 / remoteContainers.length}% - 20px)`;
@@ -712,6 +731,7 @@
             container.style.top = '10px';
             container.style.bottom = '10px';
             container.style.width = width;
+            container.style.height = '';
           }
         });
       }
@@ -737,13 +757,23 @@
     }
     
     function setupFocusLayout() {
-      const containers = document.querySelectorAll('.videoContainer');
-      const focusedContainer = document.getElementById(`video-${focusedUser}`);
-      const isPortrait = window.innerHeight > window.innerWidth;
+      const videoGrid = document.getElementById('videoGrid');
+      
+      // First, ensure all containers are back in the main videoGrid
+      const allContainers = document.querySelectorAll('.videoContainer');
+      allContainers.forEach(container => {
+        if (container.parentNode !== videoGrid) {
+          videoGrid.appendChild(container);
+        }
+      });
       
       // Remove any existing thumbnail strip
       const existingStrip = document.querySelector('.thumbnail-strip');
       if (existingStrip) existingStrip.remove();
+      
+      const containers = videoGrid.querySelectorAll('.videoContainer');
+      const focusedContainer = document.getElementById(`video-${focusedUser}`);
+      const isPortrait = window.innerHeight > window.innerWidth;
       
       containers.forEach(container => {
         container.classList.remove('focused', 'minimized', 'thumbnail');
@@ -754,6 +784,8 @@
         container.style.bottom = '';
         container.style.width = '';
         container.style.height = '';
+        container.style.zIndex = '';
+        container.style.display = 'block';
       });
       
       if (focusedContainer) {
