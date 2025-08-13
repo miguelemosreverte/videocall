@@ -615,9 +615,12 @@
           console.log('Found existing peers in room:', registration.existingPeers);
           for (const peer of registration.existingPeers) {
             const shouldInitiate = myUuid.localeCompare(peer) < 0;
+            console.log(`Checking connection to ${peer}: myUuid="${myUuid}" vs peer="${peer}", shouldInitiate=${shouldInitiate}`);
             if (shouldInitiate) {
               console.log(`Initiating connection to existing peer: ${peer}`);
               await createPeerConnection(peer, true);
+            } else {
+              console.log(`Waiting for ${peer} to initiate connection to us`);
             }
           }
         }
@@ -811,8 +814,12 @@
     // WEBRTC
     // =========================================================================
     async function createPeerConnection(targetUuid, createOffer) {
-      if (peers.has(targetUuid)) return peers.get(targetUuid);
+      if (peers.has(targetUuid)) {
+        console.log(`Already have connection to ${targetUuid}`);
+        return peers.get(targetUuid);
+      }
 
+      console.log(`Creating peer connection to ${targetUuid}, will create offer: ${createOffer}`);
       const pc = new RTCPeerConnection(iceServers);
       peers.set(targetUuid, pc);
 
@@ -833,9 +840,11 @@
       }
 
       if (createOffer) {
+        console.log(`Creating and sending offer to ${targetUuid}`);
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         await sendToPeer(targetUuid, 'offer', offer);
+        console.log(`Offer sent to ${targetUuid}`);
       }
 
       return pc;
@@ -851,9 +860,14 @@
             // A new peer joined, we should connect to them if we're the initiator
             if (!peers.has(from)) {
               const shouldInitiate = myUuid.localeCompare(from) < 0;
-              console.log(`New peer ${from} entered. Should initiate: ${shouldInitiate}`);
+              console.log(`New peer ${from} entered. myUuid="${myUuid}" vs from="${from}", shouldInitiate=${shouldInitiate}`);
               if (shouldInitiate) {
+                console.log(`Creating connection to new peer: ${from}`);
                 await createPeerConnection(from, true);
+              } else {
+                // The new peer should initiate to us, but let's create a connection to be ready
+                console.log(`Creating passive connection for new peer: ${from}`);
+                await createPeerConnection(from, false);
               }
             }
             break;
@@ -874,7 +888,13 @@
             break;
           }
           case 'ice-candidate': {
-            const pc = peers.get(from);
+            let pc = peers.get(from);
+            if (!pc) {
+              // We're receiving ICE candidates but don't have a connection yet
+              // This can happen if the other peer initiated but we haven't created our side
+              console.log(`Creating peer connection for ${from} due to ICE candidate`);
+              pc = await createPeerConnection(from, false);
+            }
             if (pc) {
               await pc.addIceCandidate(new RTCIceCandidate(data));
             }
