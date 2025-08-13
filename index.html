@@ -3,10 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Forest Friends Video Call - Progressive Loading</title>
+  <title>Forest Friends Video Call - PeerJS</title>
   <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+  <!-- PeerJS -->
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <style>
     * {
       margin: 0;
@@ -50,29 +52,6 @@
       opacity: 1;
     }
 
-    .background-image.animated {
-      animation: slowZoom 60s ease-in-out infinite alternate;
-    }
-
-    /* Placeholder gradient while loading */
-    .loading-gradient {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: linear-gradient(135deg, #87CEEB 0%, #98D98E 50%, #90EE90 100%);
-      opacity: 1;
-      transition: opacity 1s ease-out;
-    }
-
-    .loading-gradient.hidden {
-      opacity: 0;
-      pointer-events: none;
-    }
-
-    /* Dynamic keyframes injected by JS */
-
     /* Main content */
     .container {
       position: relative;
@@ -84,7 +63,6 @@
       justify-content: center;
       padding: 20px;
     }
-
 
     .avatar-grid {
       display: flex;
@@ -123,12 +101,6 @@
       box-shadow: 0 0 0 3px rgba(74, 124, 32, 0.2);
     }
 
-    .avatar-option.disabled {
-      opacity: 0.4;
-      pointer-events: none;
-    }
-
-
     .hidden {
       display: none !important;
     }
@@ -139,7 +111,6 @@
       margin-top: 15px;
       font-weight: 500;
     }
-
 
     /* Video grid */
     #videoGrid {
@@ -168,512 +139,62 @@
       height: 100%;
       object-fit: cover;
     }
-    
-    .videoContainer.minimized {
-      position: fixed !important;
-      bottom: 20px;
-      right: 20px;
-      width: 200px !important;
-      height: 150px !important;
-      z-index: 1000;
-    }
-    
-    .videoContainer.focused {
-      grid-column: 1 / -1 !important;
-      grid-row: 1 / -1 !important;
-      width: 100% !important;
-      height: 100% !important;
-      max-width: none !important;
-      max-height: none !important;
-      z-index: 100;
-    }
-    
-    .videoContainer.side-minimized {
-      position: fixed !important;
-      width: 150px !important;
-      height: 100px !important;
-      z-index: 200;
-      transition: all 0.3s ease;
-    }
-    
-    .videoContainer.side-minimized:nth-of-type(1) {
-      top: 20px;
-      right: 20px;
-    }
-    
-    .videoContainer.side-minimized:nth-of-type(2) {
-      top: 140px;
-      right: 20px;
-    }
-    
-    .videoContainer.side-minimized:nth-of-type(3) {
-      top: 260px;
-      right: 20px;
-    }
-    
-    .videoContainer.side-minimized:nth-of-type(4) {
-      top: 380px;
-      right: 20px;
-    }
-    
-    .videoContainer {
-      cursor: pointer;
-    }
-    
-    .videoContainer.master {
-      border: 3px solid gold;
-    }
-    
-    /* Chat UI */
-    .chat-container {
-      position: fixed;
-      bottom: 20px;
-      left: 20px;
-      width: 300px;
-      height: 400px;
-      background: rgba(0, 0, 0, 0.8);
-      border-radius: 10px;
-      display: flex;
-      flex-direction: column;
-      z-index: 300;
-      transition: transform 0.3s ease;
-    }
-    
-    .chat-container.minimized {
-      transform: translateY(360px);
-    }
-    
-    .chat-header {
-      padding: 10px;
-      background: rgba(255, 255, 255, 0.1);
-      border-radius: 10px 10px 0 0;
-      cursor: pointer;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    
-    .chat-messages {
-      flex: 1;
-      overflow-y: auto;
-      padding: 10px;
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-    }
-    
-    .chat-message {
-      padding: 5px 10px;
-      background: rgba(255, 255, 255, 0.1);
-      border-radius: 5px;
-      word-wrap: break-word;
-    }
-    
-    .chat-message.own {
-      background: rgba(0, 100, 200, 0.3);
-      align-self: flex-end;
-    }
-    
-    .chat-message .sender {
-      font-size: 12px;
-      color: #888;
-      margin-bottom: 3px;
-    }
-    
-    .chat-input-container {
-      padding: 10px;
-      border-top: 1px solid rgba(255, 255, 255, 0.2);
-      display: flex;
-      gap: 5px;
-    }
-    
-    .chat-input {
-      flex: 1;
-      padding: 5px 10px;
-      background: rgba(255, 255, 255, 0.1);
-      border: 1px solid rgba(255, 255, 255, 0.3);
-      border-radius: 5px;
-      color: white;
-      outline: none;
-    }
-    
-    .chat-send {
-      padding: 5px 15px;
-      background: rgba(0, 100, 200, 0.5);
-      border: none;
-      border-radius: 5px;
-      color: white;
-      cursor: pointer;
-    }
-    
-    .chat-send:hover {
-      background: rgba(0, 100, 200, 0.7);
-    }
 
     .peerId {
       position: absolute;
-      bottom: 15px;
-      left: 15px;
-      background: rgba(0,0,0,0.7);
+      bottom: 10px;
+      left: 10px;
       color: white;
-      padding: 8px 15px;
-      border-radius: 20px;
+      background: rgba(0,0,0,0.5);
+      padding: 5px 10px;
+      border-radius: 5px;
       font-size: 14px;
-      font-weight: 500;
+      z-index: 10;
     }
-    
+
     .video-controls {
       position: absolute;
-      bottom: 60px;
-      right: 15px;
+      bottom: 10px;
+      right: 10px;
       display: flex;
       gap: 10px;
       z-index: 10;
     }
-    
+
     .control-btn {
-      background: rgba(0,0,0,0.8);
+      background: rgba(0,0,0,0.5);
       color: white;
-      border: 2px solid rgba(255,255,255,0.3);
-      width: 45px;
-      height: 45px;
-      border-radius: 50%;
+      border: none;
+      padding: 8px 12px;
+      border-radius: 5px;
       cursor: pointer;
-      font-size: 20px;
-      transition: all 0.3s;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      font-size: 18px;
+      transition: background 0.3s;
     }
-    
+
     .control-btn:hover {
-      background: rgba(0,0,0,1);
-      border-color: rgba(255,255,255,0.6);
-      transform: scale(1.1);
+      background: rgba(0,0,0,0.7);
     }
-    
-    .control-btn.active {
-      background: #dc3545;
-      border-color: #dc3545;
+
+    .control-btn.muted {
+      background: rgba(255,0,0,0.5);
     }
   </style>
 </head>
 <body>
-  <!-- Background layers -->
   <div class="background-container">
-    <div class="loading-gradient" id="loadingGradient"></div>
-    <img class="background-image" id="backgroundLow" alt="" />
-    <img class="background-image" id="backgroundHigh" alt="" />
+    <img class="background-image" id="backgroundImage" />
   </div>
 
-
-  <!-- Main content -->
   <div class="container">
-    <div id="userSelection" class="avatar-grid"></div>
-    <div id="errorMessage" class="error-message"></div>
+    <div class="avatar-grid" id="userSelection"></div>
+    <div class="error-message" id="errorMessage"></div>
   </div>
 
-  <!-- Video grid (hidden until joined) -->
   <div id="videoGrid"></div>
-  
-  <!-- Chat UI -->
-  <div id="chatContainer" class="chat-container minimized">
-    <div class="chat-header" onclick="toggleChat()">
-      <span>💬 Chat</span>
-      <span id="chatToggle">▲</span>
-    </div>
-    <div id="chatMessages" class="chat-messages"></div>
-    <div class="chat-input-container">
-      <input type="text" id="chatInput" class="chat-input" placeholder="Type a message..." onkeypress="handleChatKeypress(event)">
-      <button class="chat-send" onclick="sendChat()">Send</button>
-    </div>
-  </div>
 
   <script>
-    // =========================================================================
-    // PROGRESSIVE IMAGE LOADING SYSTEM
-    // =========================================================================
-    
-    // Device detection
-    const DeviceProfile = {
-      isMobile: /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent),
-      isLowEnd: navigator.hardwareConcurrency <= 2,
-      connectionSpeed: navigator.connection?.effectiveType || '4g',
-      screenWidth: window.innerWidth,
-      screenHeight: window.innerHeight,
-      deviceMemory: navigator.deviceMemory || 4,
-      
-      getProfile() {
-        if (this.isMobile || this.deviceMemory < 4 || this.isLowEnd) {
-          return 'mobile';
-        } else if (this.deviceMemory >= 8 && this.screenWidth > 1920) {
-          return 'desktop-high';
-        } else {
-          return 'desktop';
-        }
-      }
-    };
-
-    // Image configuration
-    const backgroundImages = [
-      {
-        name: "Line-000002.png",
-        url: "assets/trees/Line-000002.png",
-        zoomedUrl: "assets/trees/zoomed/Line-000002-zoomed.jpg", 
-        trunkCenter: { x: 0.367, y: 0.372 }
-      },
-      {
-        name: "Line-000003.png",
-        url: "assets/trees/Line-000003.png",
-        zoomedUrl: "assets/trees/zoomed/Line-000003-zoomed.jpg",
-        trunkCenter: { x: 0.570, y: 0.402 }
-      },
-      {
-        name: "Line-000004.png",
-        url: "assets/trees/Line-000004.png",
-        zoomedUrl: "assets/trees/zoomed/Line-000004-zoomed.jpg",
-        trunkCenter: { x: 0.633, y: 0.441 }
-      },
-      {
-        name: "Line-000005.png",
-        url: "assets/trees/Line-000005.png",
-        zoomedUrl: "assets/trees/zoomed/Line-000005-zoomed.jpg",
-        trunkCenter: { x: 0.249, y: 0.620 }
-      },
-      {
-        name: "Line-000006.png",
-        url: "assets/trees/Line-000006.png",
-        zoomedUrl: "assets/trees/zoomed/Line-000006-zoomed.jpg",
-        trunkCenter: { x: 0.699, y: 0.855 }
-      },
-      {
-        name: "Line-000007.png",
-        url: "assets/trees/Line-000007.png",
-        zoomedUrl: "assets/trees/zoomed/Line-000007-zoomed.jpg",
-        trunkCenter: { x: 0.281, y: 0.627 }
-      },
-      {
-        name: "Line-000008.png",
-        url: "assets/trees/Line-000008.png",
-        zoomedUrl: "assets/trees/zoomed/Line-000008-zoomed.jpg",
-        trunkCenter: { x: 0.261, y: 0.653 }
-      },
-      {
-        name: "Line-000009.png",
-        url: "assets/trees/Line-000009.png",
-        zoomedUrl: "assets/trees/zoomed/Line-000009-zoomed.jpg",
-        trunkCenter: { x: 0.312, y: 0.665 }
-      },
-      {
-        name: "Line-000010.png",
-        url: "assets/trees/Line-000010.png",
-        zoomedUrl: "assets/trees/zoomed/Line-000010-zoomed.jpg",
-        trunkCenter: { x: 0.352, y: 0.646 }
-      },
-      {
-        name: "Line-000011.png",
-        url: "assets/trees/Line-000011.png",
-        zoomedUrl: "assets/trees/zoomed/Line-000011-zoomed.jpg",
-        trunkCenter: { x: 0.351, y: 0.698 }
-      },
-      {
-        name: "Line-000012.png",
-        url: "assets/trees/Line-000012.png",
-        zoomedUrl: "assets/trees/zoomed/Line-000012-zoomed.jpg",
-        trunkCenter: { x: 0.321, y: 0.631 }
-      },
-      {
-        name: "Line-000013.png",
-        url: "assets/trees/Line-000013.png",
-        zoomedUrl: "assets/trees/zoomed/Line-000013-zoomed.jpg",
-        trunkCenter: { x: 0.315, y: 0.566 }
-      }
-    ];
-
-    // Cache management
-    class ImageCache {
-      constructor() {
-        this.cache = new Map();
-        this.maxSize = DeviceProfile.isMobile ? 2 : 5; // Max images to keep in memory
-      }
-
-      async preloadImage(url) {
-        if (this.cache.has(url)) {
-          return this.cache.get(url);
-        }
-
-        return new Promise((resolve, reject) => {
-          const img = new Image();
-          img.onload = () => {
-            // Manage cache size
-            if (this.cache.size >= this.maxSize) {
-              const firstKey = this.cache.keys().next().value;
-              this.cache.delete(firstKey);
-            }
-            this.cache.set(url, img);
-            resolve(img);
-          };
-          img.onerror = reject;
-          img.src = url;
-        });
-      }
-
-      has(url) {
-        return this.cache.has(url);
-      }
-    }
-
-    const imageCache = new ImageCache();
-
-    // Progressive loader
-    class ProgressiveImageLoader {
-      constructor() {
-        this.profile = DeviceProfile.getProfile();
-        this.currentImage = null;
-      }
-
-      async loadBackgroundImage() {
-        const urlParams = new URLSearchParams(window.location.search);
-        const zoomSpeed = urlParams.get('zoom') || '60';
-        const imageIndex = urlParams.get('img');
-        
-        // Select image based on device profile
-        let selectedImage;
-        if (this.profile === 'mobile') {
-          // Mobile: always use the same image for consistency
-          selectedImage = backgroundImages[5]; // Line-000006 as default
-        } else {
-          // Desktop: random or specified
-          if (imageIndex !== null && imageIndex >= 0 && imageIndex < backgroundImages.length) {
-            selectedImage = backgroundImages[imageIndex];
-          } else {
-            selectedImage = backgroundImages[Math.floor(Math.random() * backgroundImages.length)];
-          }
-        }
-
-        this.currentImage = selectedImage;
-        
-        const loadingGradient = document.getElementById('loadingGradient');
-        const bgLow = document.getElementById('backgroundLow');
-        const bgHigh = document.getElementById('backgroundHigh');
-
-        try {
-          if (this.profile === 'mobile') {
-            // Mobile: Try zoomed version first, fallback to full
-            try {
-              const zoomedImg = await imageCache.preloadImage(selectedImage.zoomedUrl);
-              bgLow.src = zoomedImg.src;
-            } catch (e) {
-              // Fallback to full image
-              const fullImg = await imageCache.preloadImage(selectedImage.url);
-              bgLow.src = fullImg.src;
-            }
-            bgLow.classList.add('loaded');
-            loadingGradient.classList.add('hidden');
-            
-            // No animation on mobile - already zoomed
-            
-          } else if (this.profile === 'desktop') {
-            // Desktop: Progressive loading
-            // 1. Try to load zoomed version first (faster)
-            try {
-              const zoomedImg = await imageCache.preloadImage(selectedImage.zoomedUrl);
-              bgLow.src = zoomedImg.src;
-              bgLow.classList.add('loaded');
-              loadingGradient.classList.add('hidden');
-            } catch (e) {
-              console.log('Zoomed version not available, using full image');
-              // Use full image as fallback
-              const fullImg = await imageCache.preloadImage(selectedImage.url);
-              bgLow.src = fullImg.src;
-              bgLow.classList.add('loaded');
-              loadingGradient.classList.add('hidden');
-            }
-            
-            // 2. Load full version in background
-            const fullImg = await imageCache.preloadImage(selectedImage.url);
-            bgHigh.src = fullImg.src;
-            bgHigh.classList.add('loaded');
-            
-            // 3. Hide low quality once high is loaded
-            setTimeout(() => {
-              bgLow.style.display = 'none';
-              // Enable zoom animation
-              this.setupZoomAnimation(selectedImage, zoomSpeed);
-              bgHigh.classList.add('animated');
-            }, 500);
-            
-            
-            // 4. Preload next image if desktop-high
-            if (this.profile === 'desktop-high') {
-              this.preloadNext();
-            }
-            
-          } else {
-            // Desktop-high: Load full immediately + preload others
-            const fullImg = await imageCache.preloadImage(selectedImage.url);
-            bgHigh.src = fullImg.src;
-            bgHigh.classList.add('loaded');
-            loadingGradient.classList.add('hidden');
-            
-            this.setupZoomAnimation(selectedImage, zoomSpeed);
-            bgHigh.classList.add('animated');
-            
-            
-            // Preload multiple images
-            this.preloadNext(3);
-          }
-          
-        } catch (error) {
-          console.error('Failed to load image:', error);
-          // Keep gradient as fallback
-        }
-
-      }
-
-      setupZoomAnimation(image, duration) {
-        const offsetX = (image.trunkCenter.x - 0.5) * 200;
-        const offsetY = (image.trunkCenter.y - 0.5) * 200;
-        
-        const style = document.createElement('style');
-        style.textContent = `
-          @keyframes slowZoom {
-            0% {
-              transform: translate(-50%, -50%) scale(1.0);
-            }
-            100% {
-              transform: translate(calc(-50% + ${offsetX}px), calc(-50% + ${offsetY}px)) scale(1.5);
-            }
-          }
-          .animated {
-            animation-duration: ${duration}s !important;
-          }
-        `;
-        document.head.appendChild(style);
-      }
-
-      async preloadNext(count = 1) {
-        // Preload next random images in background
-        const indices = new Set();
-        while (indices.size < count) {
-          indices.add(Math.floor(Math.random() * backgroundImages.length));
-        }
-        
-        for (const idx of indices) {
-          if (backgroundImages[idx] !== this.currentImage) {
-            try {
-              await imageCache.preloadImage(backgroundImages[idx].url);
-                  } catch (e) {
-              // Silent fail for preloads
-            }
-          }
-        }
-      }
-    }
-
-    // =========================================================================
-    // FIREBASE CONFIGURATION
-    // =========================================================================
+    // Firebase configuration
     const firebaseConfig = {
       apiKey: "AIzaSyCYZGxmEuqIuDzpmqCBfSkqY7r606xFnvM",
       authDomain: "videocall-signalling.firebaseapp.com",
@@ -681,28 +202,12 @@
       projectId: "videocall-signalling",
       storageBucket: "videocall-signalling.firebasestorage.app",
       messagingSenderId: "1016443322452",
-      appId: "1:1016443322452:web:bfe5e3695f41721b5aedc1",
-      measurementId: "G-G8FZQTCM03"
+      appId: "1:1016443322452:web:bfe5e3695f41721b5aedc1"
     };
     
     // Initialize Firebase
-    let database;
-    try {
-      const app = firebase.initializeApp(firebaseConfig);
-      database = firebase.database();
-      console.log('Firebase initialized successfully');
-      
-      // Test Firebase connection
-      database.ref('.info/connected').on('value', (snapshot) => {
-        if (snapshot.val() === true) {
-          console.log('Connected to Firebase Realtime Database');
-        } else {
-          console.log('Not connected to Firebase Realtime Database');
-        }
-      });
-    } catch (error) {
-      console.error('Firebase initialization error:', error);
-    }
+    firebase.initializeApp(firebaseConfig);
+    const database = firebase.database();
 
     const users = [
       { name: "Miguel", avatar: "avatar-0.webp", emoji: "🦔" },
@@ -711,38 +216,30 @@
     ];
 
     let myUuid = null;
-    let myRegistrationTime = null; // Track when we registered
     let localStream = null;
-    const peers = new Map();
-    const dataChannels = new Map();
-    let masterPeer = null;
-    let electionInProgress = false;
-    let electionTimeout = null;
-    const peerLastSeen = new Map();
-    const peerRegistrationTimes = new Map(); // Track when each peer registered
-    const connectionAttempts = new Map(); // Track connection attempts
-    const connectionCooldown = new Map(); // Prevent rapid reconnection
-    const processedMessages = new Set();
-    const iceCandidateQueue = new Map(); // Buffer ICE candidates
-
-    const iceServers = {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
-      ]
-    };
+    let peer = null;
+    const activeCalls = new Map();
 
     // Initialize
     window.addEventListener('load', async () => {
-      // Start loading background
-      const loader = new ProgressiveImageLoader();
-      await loader.loadBackgroundImage();
-      
-      // Load user selection - no need to check active peers anymore
+      loadBackgroundImage();
       showUserSelection(users);
     });
 
-    // Removed fetchActivePeers - no longer polling server
+    function loadBackgroundImage() {
+      const images = [
+        'assets/trees/Line-000001.webp',
+        'assets/trees/Line-000002.webp',
+        'assets/trees/Line-000003.webp',
+        'assets/trees/Line-000004.webp',
+        'assets/trees/Line-000005.webp'
+      ];
+      
+      const randomImage = images[Math.floor(Math.random() * images.length)];
+      const img = document.getElementById('backgroundImage');
+      img.src = randomImage;
+      img.onload = () => img.classList.add('loaded');
+    }
     
     function showUserSelection(allUsers) {
       const userSelectionDiv = document.getElementById('userSelection');
@@ -758,8 +255,6 @@
         img.className = 'avatar-image';
 
         wrapper.onclick = () => {
-          if (wrapper.classList.contains('disabled')) return;
-          
           document.querySelectorAll('.avatar-option').forEach(el => 
             el.classList.remove('avatar-selected')
           );
@@ -777,964 +272,119 @@
       });
     }
 
-    // =========================================================================
-    // JOIN CALL
-    // =========================================================================
     async function joinCall() {
       if (!myUuid) {
         document.getElementById('errorMessage').textContent = 'Please select an avatar!';
         return;
       }
 
-      document.getElementById('errorMessage').textContent = '';
-
       try {
-        // Get camera/mic with specific constraints
-        console.log('Requesting camera and microphone access...');
-        try {
-          localStream = await navigator.mediaDevices.getUserMedia({ 
-            video: {
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-              facingMode: 'user'
-            }, 
-            audio: true 
-          });
-        } catch (err) {
-          console.error('getUserMedia error:', err);
-          // Try with simpler constraints
-          console.log('Trying with simpler constraints...');
-          localStream = await navigator.mediaDevices.getUserMedia({ 
-            video: true, 
-            audio: true 
-          });
-        }
-        
-        // Debug local stream
-        console.log('Local stream obtained:', localStream);
-        console.log('Local stream tracks:', localStream.getTracks().map(t => 
-          `${t.kind}:${t.enabled}:${t.readyState}:${t.label}`).join(', '));
+        // Get camera/mic
+        localStream = await navigator.mediaDevices.getUserMedia({ 
+          video: true, 
+          audio: true 
+        });
 
-        // Register with signaling
-        const registration = await registerPeer(myUuid);
-
-        // Switch to video view
-        document.querySelector('.container').style.display = 'none';
-        
-        const videoGrid = document.getElementById('videoGrid');
-        videoGrid.style.display = 'grid';
-        videoGrid.style.gridTemplateColumns = '1fr';
-
-        // Add local video
-        createVideoContainer(myUuid, localStream, true);
-
-        // Connect to existing peers in the room - JUST OFFER TO EVERYONE!
-        if (registration.existingPeers && registration.existingPeers.length > 0) {
-          console.log('Found existing peers in room:', registration.existingPeers);
-          for (const peer of registration.existingPeers) {
-            console.log(`Creating offer to ${peer} - let WebRTC handle any race conditions`);
-            await createPeerConnection(peer, true);
+        // Initialize PeerJS with our username as ID
+        peer = new Peer(myUuid, {
+          config: {
+            iceServers: [
+              { urls: 'stun:stun.l.google.com:19302' },
+              { urls: 'stun:stun1.l.google.com:19302' }
+            ]
           }
-        }
-        
-        // Set up Firebase listeners for signaling messages
-        setupFirebaseListeners();
+        });
+
+        peer.on('open', async (id) => {
+          console.log('My peer ID is: ' + id);
+          
+          // Register in Firebase for discovery
+          await registerPeer(id);
+          
+          // Switch to video view
+          document.querySelector('.container').style.display = 'none';
+          const videoGrid = document.getElementById('videoGrid');
+          videoGrid.style.display = 'grid';
+          videoGrid.style.gridTemplateColumns = '1fr';
+
+          // Add local video
+          createVideoContainer(myUuid, localStream, true);
+          
+          // Get existing peers and call them
+          const existingPeers = await getActivePeers();
+          existingPeers.forEach(peerId => {
+            if (peerId !== myUuid) {
+              console.log('Calling peer:', peerId);
+              const call = peer.call(peerId, localStream);
+              handleCall(call, peerId);
+            }
+          });
+        });
+
+        // Handle incoming calls
+        peer.on('call', (call) => {
+          console.log('Incoming call from:', call.peer);
+          call.answer(localStream);
+          handleCall(call, call.peer);
+        });
+
+        peer.on('error', (err) => {
+          console.error('PeerJS error:', err);
+          document.getElementById('errorMessage').textContent = 'Connection error: ' + err.type;
+        });
 
       } catch (err) {
-        document.getElementById('errorMessage').textContent = 
-          'Error: ' + err.message;
+        console.error('Error:', err);
+        document.getElementById('errorMessage').textContent = 'Error: ' + err.message;
       }
     }
 
-    async function registerPeer(uuid) {
+    function handleCall(call, peerId) {
+      // Store the call
+      activeCalls.set(peerId, call);
+      
+      // Handle remote stream
+      call.on('stream', (remoteStream) => {
+        console.log('Received stream from:', peerId);
+        createVideoContainer(peerId, remoteStream, false);
+      });
+
+      // Handle call close
+      call.on('close', () => {
+        console.log('Call closed with:', peerId);
+        removeVideoContainer(peerId);
+        activeCalls.delete(peerId);
+      });
+
+      call.on('error', (err) => {
+        console.error('Call error with', peerId, ':', err);
+      });
+    }
+
+    async function registerPeer(peerId) {
       try {
-        const now = Date.now();
-        
-        // Register in Firebase with error handling
-        console.log('Attempting to register peer:', uuid);
-        await database.ref(`peers/${uuid}`).set({
-          timestamp: now,
-          name: uuid
-        }).catch(error => {
-          console.error('Firebase write error:', error);
-          console.error('Error code:', error.code);
-          console.error('Error message:', error.message);
-          throw error;
+        await database.ref(`peers/${peerId}`).set({
+          timestamp: Date.now(),
+          name: peerId
         });
-        console.log('Successfully registered in Firebase');
         
-        // Clean up stale peers (older than 1 minute)
-        const peersSnapshot = await database.ref('peers').once('value');
-        const allPeers = peersSnapshot.val() || {};
+        // Clean up on disconnect
+        database.ref(`peers/${peerId}`).onDisconnect().remove();
         
-        for (const [peerId, peerData] of Object.entries(allPeers)) {
-          if (peerId !== uuid && now - peerData.timestamp > 60000) {
-            // Remove stale peer
-            await database.ref(`peers/${peerId}`).remove();
-            console.log(`Cleaned up stale peer: ${peerId}`);
-          }
-        }
-        
-        // Get list of active peers
-        const activePeersSnapshot = await database.ref('peers').once('value');
-        const activePeers = activePeersSnapshot.val() || {};
-        const existingPeers = Object.keys(activePeers).filter(p => p !== uuid);
-        
-        console.log('Registered with Firebase as:', uuid);
-        console.log('Active peers in room:', existingPeers);
-        myRegistrationTime = now;
-        
-        return { uuid, registered: true, existingPeers, registrationTime: now };
+        console.log('Registered in Firebase:', peerId);
       } catch (error) {
-        console.log('Registration error:', error);
-        return { uuid, registered: false };
+        console.error('Firebase registration error:', error);
       }
     }
 
-    // Firebase real-time listeners for signaling
-    async function setupFirebaseListeners() {
-      // Listen for messages addressed to us
-      const messageRef = database.ref(`messages/${myUuid}`);
-      
-      messageRef.on('child_added', async (snapshot) => {
-        const message = snapshot.val();
-        console.log(`Received ${message.type} from ${message.from}`);
-        
-        // Process the message
-        await handleSignalMessage(message);
-        
-        // Remove processed message
-        snapshot.ref.remove();
-      });
-    }
-
-    async function sendToPeer(targetUuid, type, data) {
+    async function getActivePeers() {
       try {
-        const message = {
-          type,
-          data,
-          from: myUuid,
-          timestamp: Date.now()
-        };
-        
-        // Push to target's message queue in Firebase
-        await database.ref(`messages/${targetUuid}`).push(message);
-        console.log(`Sent ${type} to ${targetUuid} via Firebase`);
-        return true;
+        const snapshot = await database.ref('peers').once('value');
+        const peers = snapshot.val() || {};
+        return Object.keys(peers).filter(id => id !== myUuid);
       } catch (error) {
-        console.error('SendToPeer error:', error);
-        return false;
-      }
-    }
-
-    // =========================================================================
-    // WEBRTC
-    // =========================================================================
-    function setupDataChannel(channel, peerUuid) {
-      channel.onopen = () => {
-        console.log(`Data channel opened with ${peerUuid}`);
-        // Send initial hello with our UUID and registration time
-        sendDataMessage(peerUuid, {
-          type: 'hello',
-          from: myUuid,
-          registrationTime: myRegistrationTime,
-          timestamp: Date.now()
-        });
-        
-        // Start heartbeat
-        startHeartbeat(peerUuid);
-        
-        // Update last seen
-        peerLastSeen.set(peerUuid, Date.now());
-        
-        // Trigger election if we don't have a master (debounced)
-        if (!masterPeer) {
-          triggerElectionDebounced();
-        }
-      };
-      
-      channel.onmessage = (event) => {
-        handleDataMessage(peerUuid, JSON.parse(event.data));
-      };
-      
-      channel.onclose = () => {
-        console.log(`Data channel closed with ${peerUuid}`);
-        stopHeartbeat(peerUuid);
-      };
-    }
-    
-    function sendDataMessage(peerUuid, message) {
-      const channel = dataChannels.get(peerUuid);
-      if (channel && channel.readyState === 'open') {
-        channel.send(JSON.stringify(message));
-      }
-    }
-    
-    function broadcastDataMessage(message) {
-      dataChannels.forEach((channel, peerUuid) => {
-        if (channel.readyState === 'open') {
-          channel.send(JSON.stringify(message));
-        }
-      });
-    }
-    
-    function handleDataMessage(fromPeer, message) {
-      peerLastSeen.set(fromPeer, Date.now());
-      
-      switch(message.type) {
-        case 'hello':
-          console.log(`Received hello from ${fromPeer}, registered at ${message.registrationTime}`);
-          // Store their registration time
-          if (message.registrationTime) {
-            peerRegistrationTimes.set(fromPeer, message.registrationTime);
-          }
-          
-          // If we're the master, broadcast this new peer to everyone
-          if (masterPeer === myUuid) {
-            const allPeers = Array.from(dataChannels.keys());
-            allPeers.push(myUuid);
-            broadcastDataMessage({
-              type: 'peer-list',
-              peers: allPeers,
-              master: myUuid
-            });
-          }
-          break;
-          
-        case 'heartbeat':
-          // Just update lastSeen (already done above)
-          break;
-          
-        case 'election':
-          // Handle election participation if needed
-          // For now, our simple election just uses lowest UUID
-          break;
-          
-        case 'elected':
-          masterPeer = message.master;
-          electionInProgress = false;
-          console.log(`New master elected: ${masterPeer}`);
-          updateMasterIndicator();
-          break;
-          
-        case 'peer-list':
-          // Master is sharing the authoritative peer list
-          if (fromPeer === masterPeer) {
-            syncPeerList(message.peers);
-            // Connect to any new peers we don't know about
-            for (const peerUuid of message.peers) {
-              if (peerUuid !== myUuid && !peers.has(peerUuid)) {
-                console.log(`Discovered new peer ${peerUuid} from master, creating connection`);
-                createPeerConnection(peerUuid, true);
-              }
-            }
-          }
-          break;
-          
-        case 'chat':
-          displayChatMessage(fromPeer, message.text);
-          break;
-          
-        case 'peer-cleanup':
-          // Master is telling us to clean up a dead peer
-          if (fromPeer === masterPeer) {
-            cleanupPeer(message.deadPeer);
-          }
-          break;
-      }
-    }
-    
-    function triggerElectionDebounced() {
-      // Clear any existing election timeout
-      if (electionTimeout) {
-        clearTimeout(electionTimeout);
-      }
-      
-      // Wait a bit to collect all peers before election
-      electionTimeout = setTimeout(() => {
-        triggerElection();
-      }, 1000);
-    }
-    
-    function triggerElection() {
-      if (electionInProgress || masterPeer) return;
-      electionInProgress = true;
-      console.log('Starting leader election...');
-      
-      // Election: oldest peer (by registration time) wins
-      const activePeers = Array.from(dataChannels.keys()).filter(uuid => {
-        const channel = dataChannels.get(uuid);
-        return channel && channel.readyState === 'open';
-      });
-      
-      // Create list with registration times
-      const peersWithTime = [];
-      
-      // Add ourselves
-      peersWithTime.push({ uuid: myUuid, time: myRegistrationTime || Date.now() });
-      
-      // Add other peers
-      activePeers.forEach(uuid => {
-        const regTime = peerRegistrationTimes.get(uuid);
-        peersWithTime.push({ uuid, time: regTime || Date.now() });
-      });
-      
-      // Sort by registration time (oldest first)
-      peersWithTime.sort((a, b) => a.time - b.time);
-      
-      const newMaster = peersWithTime[0].uuid;
-      console.log(`Election candidates:`, peersWithTime.map(p => `${p.uuid.substring(0, 8)} (registered: ${new Date(p.time).toLocaleTimeString()})`));
-      
-      // Announce election result
-      setTimeout(() => {
-        if (newMaster === myUuid) {
-          console.log('I am the new master!');
-          masterPeer = myUuid;
-          broadcastDataMessage({
-            type: 'elected',
-            master: myUuid
-          });
-          // Start master duties
-          startMasterDuties();
-        } else {
-          // Wait for master announcement
-          setTimeout(() => {
-            if (!masterPeer) {
-              // Master didn't announce, try again
-              electionInProgress = false;
-              triggerElectionDebounced();
-            }
-          }, 3000);
-        }
-        electionInProgress = false;
-        updateMasterIndicator();
-      }, 500);
-    }
-    
-    function startMasterDuties() {
-      // Clean up any existing interval
-      if (masterDutiesInterval) {
-        clearInterval(masterDutiesInterval);
-      }
-      
-      // Periodically broadcast peer list and check for dead peers
-      masterDutiesInterval = setInterval(async () => {
-        if (masterPeer !== myUuid) return;
-        
-        const activePeers = [];
-        const now = Date.now();
-        const deadPeers = [];
-        
-        // Check for dead peers
-        peerLastSeen.forEach((lastSeen, peerUuid) => {
-          if (now - lastSeen > 30000) { // 30 seconds timeout - much more forgiving
-            console.log(`Master: Peer ${peerUuid} is dead, broadcasting cleanup`);
-            deadPeers.push(peerUuid);
-            broadcastDataMessage({
-              type: 'peer-cleanup',
-              deadPeer: peerUuid
-            });
-            cleanupPeer(peerUuid);
-          } else {
-            activePeers.push(peerUuid);
-          }
-        });
-        
-        // Also clean up dead peers from Firebase as master
-        if (deadPeers.length > 0) {
-          try {
-            // Remove dead peers from Firebase
-            for (const deadPeer of deadPeers) {
-              await database.ref(`peers/${deadPeer}`).remove();
-              await database.ref(`messages/${deadPeer}`).remove();
-              console.log(`Master: Cleaned up dead peer ${deadPeer} from Firebase`);
-            }
-            
-            console.log(`Master: Cleaned up ${deadPeers.length} dead peers from Firebase`);
-          } catch (err) {
-            console.error('Master cleanup error:', err);
-          }
-        }
-        
-        // Broadcast authoritative peer list
-        broadcastDataMessage({
-          type: 'peer-list',
-          peers: activePeers,
-          master: myUuid
-        });
-      }, 5000);
-    }
-    
-    function cleanupPeer(peerUuid) {
-      console.log(`Cleaning up peer ${peerUuid}`);
-      const pc = peers.get(peerUuid);
-      if (pc) {
-        pc.close();
-        peers.delete(peerUuid);
-      }
-      dataChannels.delete(peerUuid);
-      peerLastSeen.delete(peerUuid);
-      peerRegistrationTimes.delete(peerUuid);
-      connectionAttempts.delete(peerUuid);
-      connectionCooldown.delete(peerUuid);
-      
-      const container = document.getElementById(`video-${peerUuid}`);
-      if (container) {
-        container.remove();
-        adjustGridLayout();
-      }
-    }
-    
-    let heartbeatIntervals = new Map();
-    let masterDutiesInterval = null;
-    
-    function startHeartbeat(peerUuid) {
-      const interval = setInterval(() => {
-        sendDataMessage(peerUuid, {
-          type: 'heartbeat',
-          from: myUuid,
-          timestamp: Date.now()
-        });
-      }, 3000);
-      heartbeatIntervals.set(peerUuid, interval);
-    }
-    
-    function stopHeartbeat(peerUuid) {
-      const interval = heartbeatIntervals.get(peerUuid);
-      if (interval) {
-        clearInterval(interval);
-        heartbeatIntervals.delete(peerUuid);
-      }
-    }
-    
-    function updateMasterIndicator() {
-      // Update UI to show who is master
-      document.querySelectorAll('.videoContainer').forEach(container => {
-        container.classList.remove('master');
-      });
-      
-      if (masterPeer) {
-        const masterContainer = document.getElementById(`video-${masterPeer}`);
-        if (masterContainer) {
-          masterContainer.classList.add('master');
-        }
-      }
-    }
-    
-    function syncPeerList(authoritivePeers) {
-      // Only sync if we're not the master and we trust the master
-      if (masterPeer === myUuid) return;
-      
-      // Don't remove peers that we have active data channels with
-      const currentPeers = Array.from(peers.keys());
-      
-      currentPeers.forEach(peerUuid => {
-        if (!authoritivePeers.includes(peerUuid)) {
-          // Check if we have an active data channel before removing
-          const channel = dataChannels.get(peerUuid);
-          if (!channel || channel.readyState !== 'open') {
-            console.log(`Removing peer ${peerUuid} not in master's list`);
-            cleanupPeer(peerUuid);
-          } else {
-            console.log(`Keeping peer ${peerUuid} - has active data channel`);
-          }
-        }
-      });
-    }
-    
-    // Chat functions
-    function toggleChat() {
-      const container = document.getElementById('chatContainer');
-      const toggle = document.getElementById('chatToggle');
-      container.classList.toggle('minimized');
-      toggle.textContent = container.classList.contains('minimized') ? '▲' : '▼';
-    }
-    
-    function sendChat() {
-      const input = document.getElementById('chatInput');
-      const text = input.value.trim();
-      if (!text) return;
-      
-      // Display own message
-      displayChatMessage(myUuid, text, true);
-      
-      // Send to all peers
-      broadcastDataMessage({
-        type: 'chat',
-        from: myUuid,
-        text: text,
-        timestamp: Date.now()
-      });
-      
-      input.value = '';
-    }
-    
-    function handleChatKeypress(event) {
-      if (event.key === 'Enter') {
-        sendChat();
-      }
-    }
-    
-    function displayChatMessage(fromUuid, text, isOwn = false) {
-      const messagesContainer = document.getElementById('chatMessages');
-      const messageDiv = document.createElement('div');
-      messageDiv.className = 'chat-message' + (isOwn ? ' own' : '');
-      
-      if (!isOwn) {
-        const senderDiv = document.createElement('div');
-        senderDiv.className = 'sender';
-        senderDiv.textContent = fromUuid.substring(0, 8);
-        messageDiv.appendChild(senderDiv);
-      }
-      
-      const textDiv = document.createElement('div');
-      textDiv.textContent = text;
-      messageDiv.appendChild(textDiv);
-      
-      messagesContainer.appendChild(messageDiv);
-      messagesContainer.scrollTop = messagesContainer.scrollHeight;
-      
-      // Flash chat icon if minimized and not own message
-      if (!isOwn && document.getElementById('chatContainer').classList.contains('minimized')) {
-        const header = document.querySelector('.chat-header');
-        header.style.background = 'rgba(0, 100, 200, 0.5)';
-        setTimeout(() => {
-          header.style.background = 'rgba(255, 255, 255, 0.1)';
-        }, 1000);
-      }
-    }
-    
-    async function createPeerConnection(targetUuid, createOffer) {
-      if (peers.has(targetUuid)) {
-        const existingPc = peers.get(targetUuid);
-        // Check if existing connection is still good
-        if (existingPc.connectionState === 'connected' || existingPc.connectionState === 'connecting') {
-          console.log(`Already have active connection to ${targetUuid}`);
-          return existingPc;
-        } else {
-          console.log(`Existing connection to ${targetUuid} is ${existingPc.connectionState}, replacing...`);
-          existingPc.close();
-          peers.delete(targetUuid);
-        }
-      }
-
-      console.log(`Creating peer connection to ${targetUuid}, will create offer: ${createOffer}`);
-      const pc = new RTCPeerConnection(iceServers);
-      peers.set(targetUuid, pc);
-      
-      // Mark connection as being established to prevent duplicates
-      pc.connectionStartTime = Date.now();
-      
-      // Create data channel for text protocol and chat
-      if (createOffer) {
-        const dc = pc.createDataChannel('chat', { ordered: true });
-        setupDataChannel(dc, targetUuid);
-        dataChannels.set(targetUuid, dc);
-      } else {
-        pc.ondatachannel = (event) => {
-          setupDataChannel(event.channel, targetUuid);
-          dataChannels.set(targetUuid, event.channel);
-        };
-      }
-      
-      // Monitor connection state
-      pc.onconnectionstatechange = () => {
-        console.log(`Connection state with ${targetUuid}: ${pc.connectionState}`);
-        if (pc.connectionState === 'connected') {
-          console.log(`✅ CONNECTED to ${targetUuid}`);
-          // Reset connection attempts on success
-          connectionAttempts.delete(targetUuid);
-          connectionCooldown.delete(targetUuid);
-        } else if (pc.connectionState === 'failed') {
-          console.log(`❌ Connection to ${targetUuid} failed - will retry with cooldown`);
-          // Clean up dead connection
-          pc.close();
-          peers.delete(targetUuid);
-          dataChannels.delete(targetUuid);
-          
-          // Set cooldown to prevent immediate reconnection
-          connectionCooldown.set(targetUuid, Date.now() + 5000); // 5 second cooldown
-          
-          // Remove their video container
-          const container = document.getElementById(`video-${targetUuid}`);
-          if (container) {
-            container.remove();
-            adjustGridLayout();
-          }
-        } else if (pc.connectionState === 'disconnected') {
-          // Don't immediately remove on disconnect - wait to see if it recovers
-          console.log(`⚠️ Connection to ${targetUuid} disconnected - monitoring...`);
-          setTimeout(() => {
-            const currentPc = peers.get(targetUuid);
-            if (currentPc && currentPc.connectionState === 'disconnected') {
-              console.log(`Connection to ${targetUuid} didn't recover - removing`);
-              currentPc.close();
-              peers.delete(targetUuid);
-              dataChannels.delete(targetUuid);
-              peerLastSeen.delete(targetUuid);
-              
-              // Set cooldown
-              connectionCooldown.set(targetUuid, Date.now() + 5000);
-              
-              // If this was the master, trigger new election
-              if (masterPeer === targetUuid) {
-                masterPeer = null;
-                triggerElectionDebounced();
-              }
-              
-              const container = document.getElementById(`video-${targetUuid}`);
-              if (container) {
-                container.remove();
-                adjustGridLayout();
-              }
-            }
-          }, 3000); // Wait 3 seconds to see if connection recovers
-        }
-      };
-      
-      pc.oniceconnectionstatechange = () => {
-        console.log(`ICE state with ${targetUuid}: ${pc.iceConnectionState}`);
-        
-        // Handle ICE failure
-        if (pc.iceConnectionState === 'failed') {
-          console.log(`ICE failed with ${targetUuid}, triggering ICE restart...`);
-          // Try ICE restart
-          pc.restartIce();
-        }
-      };
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          // Queue ICE candidates instead of sending immediately
-          if (!iceCandidateQueue.has(targetUuid)) {
-            iceCandidateQueue.set(targetUuid, []);
-          }
-          iceCandidateQueue.get(targetUuid).push(event.candidate);
-          
-          // Send batched candidates after a delay
-          if (!iceCandidateQueue.get(targetUuid).timer) {
-            iceCandidateQueue.get(targetUuid).timer = setTimeout(async () => {
-              const candidates = iceCandidateQueue.get(targetUuid);
-              if (candidates && candidates.length > 0) {
-                console.log(`Sending ${candidates.length} batched ICE candidates to ${targetUuid}`);
-                await sendToPeer(targetUuid, 'ice-candidates-batch', candidates);
-                iceCandidateQueue.set(targetUuid, []);
-              }
-            }, 500); // Wait 500ms to batch candidates
-          }
-        }
-      };
-
-      pc.ontrack = (event) => {
-        console.log(`Received ${event.track.kind} track from ${targetUuid}`);
-        createVideoContainer(targetUuid, event.streams[0], false);
-        
-        // Debug: check track state
-        event.track.onunmute = () => {
-          console.log(`Track ${event.track.kind} from ${targetUuid} unmuted`);
-        };
-        event.track.onmute = () => {
-          console.log(`Track ${event.track.kind} from ${targetUuid} muted`);
-        };
-      };
-
-      if (localStream) {
-        const tracks = localStream.getTracks();
-        console.log(`Adding ${tracks.length} tracks to connection for ${targetUuid}:`, 
-          tracks.map(t => `${t.kind}:${t.enabled}`).join(', '));
-        tracks.forEach(track => {
-          pc.addTrack(track, localStream);
-        });
-      }
-
-      if (createOffer) {
-        console.log(`Creating and sending offer to ${targetUuid}`);
-        try {
-          const offer = await pc.createOffer();
-          console.log(`Offer created for ${targetUuid}, setting local description`);
-          await pc.setLocalDescription(offer);
-          console.log(`Local description set, sending offer to ${targetUuid}`);
-          await sendToPeer(targetUuid, 'offer', offer);
-          console.log(`✅ Offer successfully sent to ${targetUuid}`);
-        } catch (err) {
-          console.error(`❌ Failed to create/send offer to ${targetUuid}:`, err);
-        }
-      }
-
-      return pc;
-    }
-
-    async function handleSignalMessage(msg) {
-      const { type, data, from } = msg;
-      
-      // Create unique message ID to prevent duplicates
-      const dataStr = data ? JSON.stringify(data).substring(0, 50) : '';
-      const msgId = `${from}-${type}-${dataStr}`;
-      if (processedMessages.has(msgId)) {
-        return; // Already processed this message
-      }
-      processedMessages.add(msgId);
-      
-      // Clean old processed messages periodically (keep last 100)
-      if (processedMessages.size > 100) {
-        const messagesToKeep = Array.from(processedMessages).slice(-100);
-        processedMessages.clear();
-        messagesToKeep.forEach(m => processedMessages.add(m));
-      }
-      
-      // Only log non-ping/pong messages to reduce spam
-      if (type !== 'ping' && type !== 'pong' && type !== 'ice-candidate' && type !== 'ice-candidates-batch') {
-        console.log(`Received ${type} from ${from}`);
-      }
-
-      try {
-        switch (type) {
-          case 'peer-entered': {
-            // A new peer joined - replace any existing connection
-            const existingPc = peers.get(from);
-            if (existingPc) {
-              console.log(`Peer ${from} re-entered - closing old connection`);
-              existingPc.close();
-              peers.delete(from);
-              // Remove old video container
-              const container = document.getElementById(`video-${from}`);
-              if (container) {
-                container.remove();
-              }
-            }
-            console.log(`Peer ${from} entered - creating new offer`);
-            await createPeerConnection(from, true);
-            break;
-          }
-          case 'offer': {
-            // Check if we're in cooldown
-            const cooldown = connectionCooldown.get(from);
-            if (cooldown && Date.now() < cooldown) {
-              console.log(`Ignoring offer from ${from} - still in cooldown`);
-              break;
-            }
-            let pc = peers.get(from);
-            
-            // If we have an existing connection, check if it's still alive
-            if (pc) {
-              // Log current state for debugging
-              console.log(`Existing connection to ${from}: state=${pc.connectionState}, signaling=${pc.signalingState}`);
-              
-              // Handle glare - both sent offers at same time
-              if (pc.signalingState === 'have-local-offer') {
-                // Use UUID comparison for tie-breaking
-                if (myUuid < from) {
-                  console.log(`Glare with ${from} - I win (${myUuid} < ${from}), ignoring their offer`);
-                  // IMPORTANT: They will accept our offer and send an answer
-                  // Don't break here - continue to ignore this offer but stay ready for answer
-                  break;
-                } else {
-                  console.log(`Glare with ${from} - they win (${myUuid} > ${from}), accepting their offer`);
-                  // Roll back our offer by resetting the connection
-                  await pc.setLocalDescription({type: 'rollback'});
-                  // Now we can accept their offer
-                }
-              } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
-                console.log(`Replacing dead connection to ${from}`);
-                pc.close();
-                peers.delete(from);
-                const container = document.getElementById(`video-${from}`);
-                if (container) container.remove();
-                pc = null;
-              } else if (pc.signalingState === 'stable' && pc.remoteDescription && pc.connectionState === 'connected') {
-                console.log(`Ignoring offer from ${from} - already have stable connection`);
-                break;
-              }
-            }
-            
-            // Create connection if we don't have one
-            if (!pc) {
-              pc = await createPeerConnection(from, false);
-            }
-            
-            // Only set remote description if we're in the right state
-            if (pc.signalingState === 'stable' || pc.signalingState === 'have-local-offer') {
-              await pc.setRemoteDescription(new RTCSessionDescription(data));
-              
-              // Apply any pending ICE candidates
-              if (pc.pendingCandidates && pc.pendingCandidates.length > 0) {
-                console.log(`Applying ${pc.pendingCandidates.length} pending ICE candidates for ${from}`);
-                for (const candidate of pc.pendingCandidates) {
-                  try {
-                    await pc.addIceCandidate(new RTCIceCandidate(candidate));
-                  } catch (err) {
-                    console.error('Error adding pending ICE candidate:', err);
-                  }
-                }
-                pc.pendingCandidates = [];
-              }
-              
-              const answer = await pc.createAnswer();
-              await pc.setLocalDescription(answer);
-              await sendToPeer(from, 'answer', answer);
-            }
-            break;
-          }
-          case 'answer': {
-            const pc = peers.get(from);
-            if (!pc) {
-              console.log(`Ignoring answer from ${from} - no peer connection`);
-              break;
-            }
-            if (pc.signalingState !== 'have-local-offer') {
-              console.log(`Ignoring answer from ${from} - not expecting answer (state: ${pc.signalingState})`);
-              // Don't break - might be duplicate, log it
-              console.log(`Current connection state: ${pc.connectionState}`);
-              break;
-            }
-            console.log(`Processing answer from ${from}`);
-            try {
-              await pc.setRemoteDescription(new RTCSessionDescription(data));
-              
-              // Apply any pending ICE candidates
-              if (pc.pendingCandidates && pc.pendingCandidates.length > 0) {
-                console.log(`Applying ${pc.pendingCandidates.length} pending ICE candidates for ${from}`);
-                for (const candidate of pc.pendingCandidates) {
-                  try {
-                    await pc.addIceCandidate(new RTCIceCandidate(candidate));
-                  } catch (err) {
-                    console.error('Error adding pending ICE candidate:', err);
-                  }
-                }
-                pc.pendingCandidates = [];
-              }
-            } catch (err) {
-              console.error(`Failed to set answer from ${from}:`, err);
-            }
-            break;
-          }
-          case 'ice-candidate': {
-            let pc = peers.get(from);
-            if (!pc) {
-              // We're receiving ICE candidates but don't have a connection yet
-              // This can happen if the other peer initiated but we haven't created our side
-              console.log(`Creating peer connection for ${from} due to ICE candidate`);
-              pc = await createPeerConnection(from, false);
-            }
-            if (pc) {
-              await pc.addIceCandidate(new RTCIceCandidate(data));
-            }
-            break;
-          }
-          case 'ice-candidates-batch': {
-            let pc = peers.get(from);
-            if (!pc) {
-              // Create connection if we don't have one yet
-              console.log(`Creating peer connection for ${from} due to ICE candidates`);
-              pc = await createPeerConnection(from, false);
-            }
-            
-            if (pc && Array.isArray(data)) {
-              console.log(`Received ${data.length} batched ICE candidates from ${from}`);
-              
-              // Check if remote description is set
-              if (!pc.remoteDescription) {
-                console.log(`Queueing ICE candidates for ${from} - waiting for remote description`);
-                // Store candidates to add later
-                if (!pc.pendingCandidates) {
-                  pc.pendingCandidates = [];
-                }
-                pc.pendingCandidates.push(...data);
-              } else {
-                // Add candidates immediately
-                for (const candidate of data) {
-                  try {
-                    await pc.addIceCandidate(new RTCIceCandidate(candidate));
-                  } catch (err) {
-                    console.error('Error adding ICE candidate:', err);
-                  }
-                }
-              }
-            }
-            break;
-          }
-          case 'ping': {
-            // Respond to ping with pong (silently)
-            await sendToPeer(from, 'pong', { timestamp: Date.now() });
-            break;
-          }
-          case 'pong': {
-            // Mark peer as alive (silently - no log to reduce spam)
-            break;
-          }
-          case 'announce-peers': {
-            // Flood message to announce all known peers
-            if (!data) {
-              console.log('Received announce-peers with no data, ignoring');
-              break;
-            }
-            const ttl = (data.ttl || 0) - 1;
-            const origin = data.origin || from;
-            
-            if (ttl > 0 && origin !== myUuid) {
-              console.log(`Received announce-peers request from ${from} (origin: ${origin}, ttl: ${ttl})`);
-              
-              // Get all known peers
-              const knownPeers = Array.from(peers.keys());
-              knownPeers.push(myUuid); // Include ourselves
-              
-              // Send peer list to the origin
-              await sendToPeer(origin, 'peer-list', {
-                peers: knownPeers,
-                from: myUuid
-              });
-              
-              // Forward the announce request to other peers (flooding with TTL)
-              for (const peer of knownPeers) {
-                if (peer !== myUuid && peer !== from && peer !== origin) {
-                  await sendToPeer(peer, 'announce-peers', {
-                    ttl: ttl,
-                    origin: origin
-                  });
-                }
-              }
-            }
-            break;
-          }
-          case 'peer-list': {
-            // Received a list of peers from someone
-            console.log(`Received peer list from ${from}:`, data.peers);
-            
-            // Try to connect to any peers we don't know about
-            if (Array.isArray(data.peers)) {
-              for (const peer of data.peers) {
-                if (peer !== myUuid && !peers.has(peer)) {
-                  console.log(`Discovered new peer ${peer} via ${from}`);
-                  
-                  const shouldInitiate = myUuid.localeCompare(peer) < 0;
-                  if (shouldInitiate) {
-                    console.log(`Initiating connection to discovered peer: ${peer}`);
-                    await createPeerConnection(peer, true);
-                  }
-                }
-              }
-            }
-            break;
-          }
-          case 'request-connection': {
-            // Someone is asking us to connect to them
-            const requester = data.from || from;
-            console.log(`Received connection request from ${requester}`);
-            
-            if (!peers.has(requester)) {
-              const shouldInitiate = myUuid.localeCompare(requester) < 0;
-              if (shouldInitiate) {
-                console.log(`Honoring connection request - initiating to ${requester}`);
-                await createPeerConnection(requester, true);
-              } else {
-                console.log(`Connection request received but ${requester} should initiate`);
-              }
-            }
-            break;
-          }
-        }
-      } catch (err) {
-        console.error('Error handling signal:', err);
+        console.error('Error getting peers:', error);
+        return [];
       }
     }
 
@@ -1749,10 +399,7 @@
         const video = document.createElement('video');
         video.autoplay = true;
         video.playsInline = true;
-        // Mute all videos initially to comply with autoplay policy
-        video.muted = true;
-        video.setAttribute('autoplay', '');
-        video.setAttribute('playsinline', '');
+        video.muted = isLocal; // Only mute local video
 
         const label = document.createElement('div');
         label.className = 'peerId';
@@ -1763,169 +410,64 @@
         container.appendChild(video);
         container.appendChild(label);
         
-        // Add controls
+        // Add mute button
         const controls = document.createElement('div');
         controls.className = 'video-controls';
         
         if (isLocal) {
-          // Mute button for self
           const muteBtn = document.createElement('button');
           muteBtn.className = 'control-btn';
           muteBtn.innerHTML = '🎤';
-          muteBtn.onclick = (e) => {
-            e.stopPropagation();
-            toggleMute(muteBtn);
+          muteBtn.onclick = () => {
+            const audioTrack = localStream.getAudioTracks()[0];
+            if (audioTrack) {
+              audioTrack.enabled = !audioTrack.enabled;
+              muteBtn.classList.toggle('muted');
+              muteBtn.innerHTML = audioTrack.enabled ? '🎤' : '🔇';
+            }
           };
-          
-          // Minimize button
-          const minimizeBtn = document.createElement('button');
-          minimizeBtn.className = 'control-btn';
-          minimizeBtn.innerHTML = '⬇';
-          minimizeBtn.onclick = (e) => {
-            e.stopPropagation();
-            toggleMinimize(container, minimizeBtn);
-          };
-          
           controls.appendChild(muteBtn);
-          controls.appendChild(minimizeBtn);
-        } else {
-          // Mute button for remote users (mutes their audio locally)
-          const muteRemoteBtn = document.createElement('button');
-          muteRemoteBtn.className = 'control-btn';
-          muteRemoteBtn.innerHTML = '🔊';
-          muteRemoteBtn.onclick = (e) => {
-            e.stopPropagation();
-            toggleRemoteMute(video, muteRemoteBtn);
-          };
-          controls.appendChild(muteRemoteBtn);
         }
         
         container.appendChild(controls);
-        
-        // Add click handler for focus/unfocus
-        container.onclick = () => toggleFocus(container);
-        
         document.getElementById('videoGrid').appendChild(container);
-
+        
         adjustGridLayout();
       }
 
       const video = container.querySelector('video');
-      if (video.srcObject !== stream) {
-        video.srcObject = stream;
-        video.play().catch(e => {
-          console.log(`Autoplay blocked for ${uuid}, playing muted`);
-          video.muted = true;
-          video.play();
-        });
+      video.srcObject = stream;
+    }
+
+    function removeVideoContainer(uuid) {
+      const container = document.getElementById(`video-${uuid}`);
+      if (container) {
+        container.remove();
+        adjustGridLayout();
       }
-    }
-    
-    function toggleMute(btn) {
-      if (localStream) {
-        const audioTrack = localStream.getAudioTracks()[0];
-        if (audioTrack) {
-          audioTrack.enabled = !audioTrack.enabled;
-          btn.classList.toggle('active');
-          btn.innerHTML = audioTrack.enabled ? '🎤' : '🔇';
-        }
-      }
-    }
-    
-    function toggleMinimize(container, btn) {
-      container.classList.toggle('minimized');
-      btn.innerHTML = container.classList.contains('minimized') ? '⬆' : '⬇';
-      adjustGridLayout();
-    }
-    
-    function toggleRemoteMute(video, btn) {
-      // Toggle mute state for remote video (local muting only)
-      video.muted = !video.muted;
-      btn.classList.toggle('active');
-      btn.innerHTML = video.muted ? '🔇' : '🔊';
-    }
-    
-    function toggleFocus(clickedContainer) {
-      const grid = document.getElementById('videoGrid');
-      const allContainers = grid.querySelectorAll('.videoContainer');
-      
-      // Check if any container is currently focused
-      const currentlyFocused = grid.querySelector('.videoContainer.focused');
-      
-      if (currentlyFocused === clickedContainer) {
-        // Clicking the focused container again - unfocus all
-        allContainers.forEach(container => {
-          container.classList.remove('focused', 'side-minimized');
-        });
-      } else {
-        // Focus the clicked container, minimize others
-        allContainers.forEach(container => {
-          if (container === clickedContainer) {
-            container.classList.add('focused');
-            container.classList.remove('side-minimized');
-          } else {
-            container.classList.remove('focused');
-            container.classList.add('side-minimized');
-          }
-        });
-      }
-      
-      adjustGridLayout();
     }
 
     function adjustGridLayout() {
-      const grid = document.getElementById('videoGrid');
+      const videoGrid = document.getElementById('videoGrid');
+      const containerCount = videoGrid.querySelectorAll('.videoContainer').length;
       
-      // Check if there's a focused video - if so, skip grid adjustments
-      const hasFocused = grid.querySelector('.videoContainer.focused');
-      if (hasFocused) {
-        grid.style.gridTemplateColumns = '1fr';
-        grid.style.gridTemplateRows = '1fr';
-        return;
-      }
-      
-      // Only count non-minimized containers for grid layout
-      const containers = grid.querySelectorAll('.videoContainer:not(.minimized):not(.side-minimized)');
-      const count = containers.length;
-      
-      if (count <= 1) {
-        grid.style.gridTemplateColumns = '1fr';
-        grid.style.gridTemplateRows = '1fr';
-      } else if (count === 2) {
-        grid.style.gridTemplateColumns = '1fr 1fr';
-        grid.style.gridTemplateRows = '1fr';
-      } else if (count === 3) {
-        // 2 on top, 1 on bottom
-        grid.style.gridTemplateColumns = '1fr 1fr';
-        grid.style.gridTemplateRows = '1fr 1fr';
-      } else if (count === 4) {
-        // 2x2 grid
-        grid.style.gridTemplateColumns = '1fr 1fr';
-        grid.style.gridTemplateRows = '1fr 1fr';
-      } else if (count <= 6) {
-        // 3x2 grid
-        grid.style.gridTemplateColumns = '1fr 1fr 1fr';
-        grid.style.gridTemplateRows = '1fr 1fr';
+      if (containerCount === 1) {
+        videoGrid.style.gridTemplateColumns = '1fr';
+      } else if (containerCount === 2) {
+        videoGrid.style.gridTemplateColumns = 'repeat(2, 1fr)';
+      } else if (containerCount <= 4) {
+        videoGrid.style.gridTemplateColumns = 'repeat(2, 1fr)';
+        videoGrid.style.gridTemplateRows = 'repeat(2, 1fr)';
       } else {
-        // 3x3 grid
-        grid.style.gridTemplateColumns = '1fr 1fr 1fr';
-        grid.style.gridTemplateRows = '1fr 1fr 1fr';
+        videoGrid.style.gridTemplateColumns = 'repeat(3, 1fr)';
       }
     }
 
     // Cleanup on exit
-    window.addEventListener('beforeunload', async () => {
-      if (myUuid) {
-        try {
-          // Remove from Firebase
-          await database.ref(`peers/${myUuid}`).remove();
-          await database.ref(`messages/${myUuid}`).remove();
-          console.log('Cleaned up peer from Firebase');
-        } catch (err) {
-          console.error('Cleanup error:', err);
-        }
+    window.addEventListener('beforeunload', () => {
+      if (peer) {
+        peer.destroy();
       }
-      peers.forEach(pc => pc.close());
       if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
       }
