@@ -821,9 +821,20 @@
         const now = Date.now();
         const wasNewPeer = !record.peers[uuid];
         
-        // Clean up stale peers (older than 60 seconds)
-        // Don't clean up peers on registration - master handles cleanup via data channels
-        // Just log who's in the room
+        // Clean up VERY stale peers (older than 5 minutes - definitely gone)
+        const veryStale = [];
+        for (const [peer, timestamp] of Object.entries(record.peers)) {
+          if (now - timestamp > 300000 && peer !== uuid) { // 5 minutes
+            veryStale.push(peer);
+            delete record.peers[peer];
+            delete record.messages[peer];
+          }
+        }
+        if (veryStale.length > 0) {
+          console.log('Cleaned up very stale peers:', veryStale);
+        }
+        
+        // Log who's in the room
         const currentPeers = Object.keys(record.peers).filter(p => p !== uuid);
         if (currentPeers.length > 0) {
           console.log('Current peers in room:', currentPeers);
@@ -1611,13 +1622,14 @@
                 // Use UUID comparison for tie-breaking
                 if (myUuid < from) {
                   console.log(`Glare with ${from} - I win (${myUuid} < ${from}), ignoring their offer`);
+                  // IMPORTANT: They will accept our offer and send an answer
+                  // Don't break here - continue to ignore this offer but stay ready for answer
                   break;
                 } else {
-                  console.log(`Glare with ${from} - they win (${myUuid} > ${from}), rolling back my offer`);
-                  // Close and recreate connection
-                  pc.close();
-                  peers.delete(from);
-                  pc = null;
+                  console.log(`Glare with ${from} - they win (${myUuid} > ${from}), accepting their offer`);
+                  // Roll back our offer by resetting the connection
+                  await pc.setLocalDescription({type: 'rollback'});
+                  // Now we can accept their offer
                 }
               } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
                 console.log(`Replacing dead connection to ${from}`);
