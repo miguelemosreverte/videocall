@@ -1407,7 +1407,10 @@
 
       pc.ontrack = (event) => {
         console.log(`Received ${event.track.kind} track from ${targetUuid}, enabled: ${event.track.enabled}, muted: ${event.track.muted}`);
-        createVideoContainer(targetUuid, event.streams[0], false);
+        const stream = event.streams[0];
+        console.log(`Stream from ${targetUuid} has ${stream.getTracks().length} tracks:`, 
+          stream.getTracks().map(t => `${t.kind}:${t.enabled}:${t.readyState}`).join(', '));
+        createVideoContainer(targetUuid, stream, false);
         
         // Debug: check track state
         event.track.onunmute = () => {
@@ -1729,13 +1732,10 @@
         const video = document.createElement('video');
         video.autoplay = true;
         video.playsInline = true;
-        // Only mute local video to prevent echo, remote should have audio
-        if (isLocal) {
-          video.muted = true;
-        } else {
-          video.muted = false;
-          video.volume = 1.0;
-        }
+        // Mute all videos initially to comply with autoplay policy
+        video.muted = true;
+        video.setAttribute('autoplay', '');
+        video.setAttribute('playsinline', '');
 
         const label = document.createElement('div');
         label.className = 'peerId';
@@ -1796,6 +1796,13 @@
       const video = container.querySelector('video');
       if (video.srcObject !== stream) {
         video.srcObject = stream;
+        // Ensure video plays after setting stream
+        video.play().catch(err => {
+          console.error(`Error playing video for ${uuid}:`, err);
+          // Try playing muted if autoplay was blocked
+          video.muted = true;
+          video.play().catch(e => console.error('Still cannot play:', e));
+        });
       }
     }
     
