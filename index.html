@@ -789,11 +789,20 @@
       document.getElementById('errorMessage').textContent = '';
 
       try {
-        // Get camera/mic
+        // Get camera/mic with specific constraints
         localStream = await navigator.mediaDevices.getUserMedia({ 
-          video: true, 
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            facingMode: 'user'
+          }, 
           audio: true 
         });
+        
+        // Debug local stream
+        console.log('Local stream obtained:', localStream);
+        console.log('Local stream tracks:', localStream.getTracks().map(t => 
+          `${t.kind}:${t.enabled}:${t.readyState}:${t.label}`).join(', '));
 
         // Register with signaling
         const registration = await registerPeer(myUuid);
@@ -1796,8 +1805,25 @@
       const video = container.querySelector('video');
       if (video.srcObject !== stream) {
         video.srcObject = stream;
+        
+        // Debug video element
+        console.log(`Setting video for ${uuid}:`, {
+          hasStream: !!stream,
+          trackCount: stream.getTracks().length,
+          videoTracks: stream.getVideoTracks().length,
+          audioTracks: stream.getAudioTracks().length,
+          videoWidth: video.videoWidth,
+          videoHeight: video.videoHeight
+        });
+        
         // Ensure video plays after setting stream
-        video.play().catch(err => {
+        video.play().then(() => {
+          console.log(`Video playing for ${uuid}`);
+          // Check dimensions after playing
+          setTimeout(() => {
+            console.log(`Video dimensions for ${uuid}: ${video.videoWidth}x${video.videoHeight}`);
+          }, 1000);
+        }).catch(err => {
           console.error(`Error playing video for ${uuid}:`, err);
           // Try playing muted if autoplay was blocked
           video.muted = true;
