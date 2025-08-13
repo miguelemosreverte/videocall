@@ -174,6 +174,48 @@
       height: 150px !important;
       z-index: 1000;
     }
+    
+    .videoContainer.focused {
+      grid-column: 1 / -1 !important;
+      grid-row: 1 / -1 !important;
+      width: 100% !important;
+      height: 100% !important;
+      max-width: none !important;
+      max-height: none !important;
+      z-index: 100;
+    }
+    
+    .videoContainer.side-minimized {
+      position: fixed !important;
+      width: 150px !important;
+      height: 100px !important;
+      z-index: 200;
+      transition: all 0.3s ease;
+    }
+    
+    .videoContainer.side-minimized:nth-of-type(1) {
+      top: 20px;
+      right: 20px;
+    }
+    
+    .videoContainer.side-minimized:nth-of-type(2) {
+      top: 140px;
+      right: 20px;
+    }
+    
+    .videoContainer.side-minimized:nth-of-type(3) {
+      top: 260px;
+      right: 20px;
+    }
+    
+    .videoContainer.side-minimized:nth-of-type(4) {
+      top: 380px;
+      right: 20px;
+    }
+    
+    .videoContainer {
+      cursor: pointer;
+    }
 
     .peerId {
       position: absolute;
@@ -1260,27 +1302,47 @@
         container.appendChild(video);
         container.appendChild(label);
         
-        // Add controls for local video
+        // Add controls
+        const controls = document.createElement('div');
+        controls.className = 'video-controls';
+        
         if (isLocal) {
-          const controls = document.createElement('div');
-          controls.className = 'video-controls';
-          
-          // Mute button
+          // Mute button for self
           const muteBtn = document.createElement('button');
           muteBtn.className = 'control-btn';
           muteBtn.innerHTML = '🎤';
-          muteBtn.onclick = () => toggleMute(muteBtn);
+          muteBtn.onclick = (e) => {
+            e.stopPropagation();
+            toggleMute(muteBtn);
+          };
           
           // Minimize button
           const minimizeBtn = document.createElement('button');
           minimizeBtn.className = 'control-btn';
           minimizeBtn.innerHTML = '⬇';
-          minimizeBtn.onclick = () => toggleMinimize(container, minimizeBtn);
+          minimizeBtn.onclick = (e) => {
+            e.stopPropagation();
+            toggleMinimize(container, minimizeBtn);
+          };
           
           controls.appendChild(muteBtn);
           controls.appendChild(minimizeBtn);
-          container.appendChild(controls);
+        } else {
+          // Mute button for remote users (mutes their audio locally)
+          const muteRemoteBtn = document.createElement('button');
+          muteRemoteBtn.className = 'control-btn';
+          muteRemoteBtn.innerHTML = '🔊';
+          muteRemoteBtn.onclick = (e) => {
+            e.stopPropagation();
+            toggleRemoteMute(video, muteRemoteBtn);
+          };
+          controls.appendChild(muteRemoteBtn);
         }
+        
+        container.appendChild(controls);
+        
+        // Add click handler for focus/unfocus
+        container.onclick = () => toggleFocus(container);
         
         document.getElementById('videoGrid').appendChild(container);
 
@@ -1309,11 +1371,55 @@
       btn.innerHTML = container.classList.contains('minimized') ? '⬆' : '⬇';
       adjustGridLayout();
     }
+    
+    function toggleRemoteMute(video, btn) {
+      // Toggle mute state for remote video (local muting only)
+      video.muted = !video.muted;
+      btn.classList.toggle('active');
+      btn.innerHTML = video.muted ? '🔇' : '🔊';
+    }
+    
+    function toggleFocus(clickedContainer) {
+      const grid = document.getElementById('videoGrid');
+      const allContainers = grid.querySelectorAll('.videoContainer');
+      
+      // Check if any container is currently focused
+      const currentlyFocused = grid.querySelector('.videoContainer.focused');
+      
+      if (currentlyFocused === clickedContainer) {
+        // Clicking the focused container again - unfocus all
+        allContainers.forEach(container => {
+          container.classList.remove('focused', 'side-minimized');
+        });
+      } else {
+        // Focus the clicked container, minimize others
+        allContainers.forEach(container => {
+          if (container === clickedContainer) {
+            container.classList.add('focused');
+            container.classList.remove('side-minimized');
+          } else {
+            container.classList.remove('focused');
+            container.classList.add('side-minimized');
+          }
+        });
+      }
+      
+      adjustGridLayout();
+    }
 
     function adjustGridLayout() {
       const grid = document.getElementById('videoGrid');
+      
+      // Check if there's a focused video - if so, skip grid adjustments
+      const hasFocused = grid.querySelector('.videoContainer.focused');
+      if (hasFocused) {
+        grid.style.gridTemplateColumns = '1fr';
+        grid.style.gridTemplateRows = '1fr';
+        return;
+      }
+      
       // Only count non-minimized containers for grid layout
-      const containers = grid.querySelectorAll('.videoContainer:not(.minimized)');
+      const containers = grid.querySelectorAll('.videoContainer:not(.minimized):not(.side-minimized)');
       const count = containers.length;
       
       if (count <= 1) {
