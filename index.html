@@ -880,11 +880,24 @@
             }
           }
           
-          // Stop polling once everyone is connected
+          // Stop polling once everyone is connected for a while
           if (allConnected && peers.size > 0) {
-            console.log('All peers connected, stopping signaling poll');
-            clearInterval(pollingInterval);
-            pollingInterval = null;
+            // Keep polling for a bit longer to ensure all messages are processed
+            setTimeout(() => {
+              // Check again if still all connected
+              let stillConnected = true;
+              for (const [peerUuid, pc] of peers) {
+                if (pc.connectionState !== 'connected') {
+                  stillConnected = false;
+                  break;
+                }
+              }
+              if (stillConnected && pollingInterval) {
+                console.log('All peers stable, stopping signaling poll');
+                clearInterval(pollingInterval);
+                pollingInterval = null;
+              }
+            }, 10000); // Keep polling 10 more seconds after connection
             return;
           }
           
@@ -1176,7 +1189,7 @@
         
         // Check for dead peers
         peerLastSeen.forEach((lastSeen, peerUuid) => {
-          if (now - lastSeen > 15000) { // 15 seconds timeout (increased from 10)
+          if (now - lastSeen > 30000) { // 30 seconds timeout - much more forgiving
             console.log(`Master: Peer ${peerUuid} is dead, broadcasting cleanup`);
             deadPeers.push(peerUuid);
             broadcastDataMessage({
@@ -1582,6 +1595,9 @@
             
             // If we have an existing connection, check if it's still alive
             if (pc) {
+              // Log current state for debugging
+              console.log(`Existing connection to ${from}: state=${pc.connectionState}, signaling=${pc.signalingState}`);
+              
               // Handle glare - both sent offers at same time
               if (pc.signalingState === 'have-local-offer') {
                 // Use UUID comparison for tie-breaking
