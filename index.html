@@ -1746,6 +1746,25 @@
     function createVideoContainer(uuid, stream, isLocal) {
       let container = document.getElementById(`video-${uuid}`);
       
+      // If container exists, check if we need to update the stream
+      if (container) {
+        const video = container.querySelector('video');
+        if (video) {
+          // Only update if the new stream has more tracks than the current one
+          const currentStream = video.srcObject;
+          if (!currentStream || stream.getTracks().length > currentStream.getTracks().length) {
+            console.log(`Updating video stream for ${uuid}: ${currentStream ? currentStream.getTracks().length : 0} -> ${stream.getTracks().length} tracks`);
+            video.srcObject = stream;
+            video.play().catch(e => {
+              console.error(`Error playing updated video for ${uuid}:`, e);
+              video.muted = true;
+              video.play();
+            });
+          }
+        }
+        return;
+      }
+      
       if (!container) {
         container = document.createElement('div');
         container.className = 'videoContainer';
