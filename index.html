@@ -216,6 +216,96 @@
     .videoContainer {
       cursor: pointer;
     }
+    
+    .videoContainer.master {
+      border: 3px solid gold;
+    }
+    
+    /* Chat UI */
+    .chat-container {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      width: 300px;
+      height: 400px;
+      background: rgba(0, 0, 0, 0.8);
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      z-index: 300;
+      transition: transform 0.3s ease;
+    }
+    
+    .chat-container.minimized {
+      transform: translateY(360px);
+    }
+    
+    .chat-header {
+      padding: 10px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 10px 10px 0 0;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    
+    .chat-message {
+      padding: 5px 10px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 5px;
+      word-wrap: break-word;
+    }
+    
+    .chat-message.own {
+      background: rgba(0, 100, 200, 0.3);
+      align-self: flex-end;
+    }
+    
+    .chat-message .sender {
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 3px;
+    }
+    
+    .chat-input-container {
+      padding: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.2);
+      display: flex;
+      gap: 5px;
+    }
+    
+    .chat-input {
+      flex: 1;
+      padding: 5px 10px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 5px;
+      color: white;
+      outline: none;
+    }
+    
+    .chat-send {
+      padding: 5px 15px;
+      background: rgba(0, 100, 200, 0.5);
+      border: none;
+      border-radius: 5px;
+      color: white;
+      cursor: pointer;
+    }
+    
+    .chat-send:hover {
+      background: rgba(0, 100, 200, 0.7);
+    }
 
     .peerId {
       position: absolute;
@@ -282,6 +372,19 @@
 
   <!-- Video grid (hidden until joined) -->
   <div id="videoGrid"></div>
+  
+  <!-- Chat UI -->
+  <div id="chatContainer" class="chat-container minimized">
+    <div class="chat-header" onclick="toggleChat()">
+      <span>💬 Chat</span>
+      <span id="chatToggle">▲</span>
+    </div>
+    <div id="chatMessages" class="chat-messages"></div>
+    <div class="chat-input-container">
+      <input type="text" id="chatInput" class="chat-input" placeholder="Type a message..." onkeypress="handleChatKeypress(event)">
+      <button class="chat-send" onclick="sendChat()">Send</button>
+    </div>
+  </div>
 
   <script>
     // =========================================================================
@@ -575,6 +678,10 @@
     let myUuid = null;
     let localStream = null;
     const peers = new Map();
+    const dataChannels = new Map();
+    let masterPeer = null;
+    let electionInProgress = false;
+    const peerLastSeen = new Map();
     let isPolling = false;
     let lastKnownPeers = [];
     const processedMessages = new Set();
@@ -942,6 +1049,328 @@
     // =========================================================================
     // WEBRTC
     // =========================================================================
+    function setupDataChannel(channel, peerUuid) {
+      channel.onopen = () => {
+        console.log(`Data channel opened with ${peerUuid}`);
+        // Send initial hello with our UUID
+        sendDataMessage(peerUuid, {
+          type: 'hello',
+          from: myUuid,
+          timestamp: Date.now()
+        });
+        
+        // Start heartbeat
+        startHeartbeat(peerUuid);
+        
+        // Trigger election if we don't have a master
+        if (!masterPeer && !electionInProgress) {
+          triggerElection();
+        }
+      };
+      
+      channel.onmessage = (event) => {
+        handleDataMessage(peerUuid, JSON.parse(event.data));
+      };
+      
+      channel.onclose = () => {
+        console.log(`Data channel closed with ${peerUuid}`);
+        stopHeartbeat(peerUuid);
+      };
+    }
+    
+    function sendDataMessage(peerUuid, message) {
+      const channel = dataChannels.get(peerUuid);
+      if (channel && channel.readyState === 'open') {
+        channel.send(JSON.stringify(message));
+      }
+    }
+    
+    function broadcastDataMessage(message) {
+      dataChannels.forEach((channel, peerUuid) => {
+        if (channel.readyState === 'open') {
+          channel.send(JSON.stringify(message));
+        }
+      });
+    }
+    
+    function handleDataMessage(fromPeer, message) {
+      peerLastSeen.set(fromPeer, Date.now());
+      
+      switch(message.type) {
+        case 'hello':
+          console.log(`Received hello from ${fromPeer}`);
+          break;
+          
+        case 'heartbeat':
+          // Just update lastSeen (already done above)
+          break;
+          
+        case 'election':
+          // Handle election participation if needed
+          // For now, our simple election just uses lowest UUID
+          break;
+          
+        case 'elected':
+          masterPeer = message.master;
+          electionInProgress = false;
+          console.log(`New master elected: ${masterPeer}`);
+          updateMasterIndicator();
+          break;
+          
+        case 'peer-list':
+          // Master is sharing the authoritative peer list
+          if (fromPeer === masterPeer) {
+            syncPeerList(message.peers);
+          }
+          break;
+          
+        case 'chat':
+          displayChatMessage(fromPeer, message.text);
+          break;
+          
+        case 'peer-cleanup':
+          // Master is telling us to clean up a dead peer
+          if (fromPeer === masterPeer) {
+            cleanupPeer(message.deadPeer);
+          }
+          break;
+      }
+    }
+    
+    function triggerElection() {
+      if (electionInProgress) return;
+      electionInProgress = true;
+      console.log('Starting leader election...');
+      
+      // Simple election: lowest UUID wins
+      const activePeers = Array.from(dataChannels.keys()).filter(uuid => {
+        const channel = dataChannels.get(uuid);
+        return channel && channel.readyState === 'open';
+      });
+      
+      activePeers.push(myUuid);
+      activePeers.sort();
+      
+      const newMaster = activePeers[0];
+      
+      // Announce election result
+      setTimeout(() => {
+        if (newMaster === myUuid) {
+          console.log('I am the new master!');
+          masterPeer = myUuid;
+          broadcastDataMessage({
+            type: 'elected',
+            master: myUuid
+          });
+          // Start master duties
+          startMasterDuties();
+        } else {
+          // Wait for master announcement
+          setTimeout(() => {
+            if (!masterPeer) {
+              // Master didn't announce, try again
+              electionInProgress = false;
+              triggerElection();
+            }
+          }, 2000);
+        }
+        electionInProgress = false;
+        updateMasterIndicator();
+      }, 500);
+    }
+    
+    function startMasterDuties() {
+      // Periodically broadcast peer list and check for dead peers
+      setInterval(async () => {
+        if (masterPeer !== myUuid) return;
+        
+        const activePeers = [];
+        const now = Date.now();
+        const deadPeers = [];
+        
+        // Check for dead peers
+        peerLastSeen.forEach((lastSeen, peerUuid) => {
+          if (now - lastSeen > 10000) { // 10 seconds timeout
+            console.log(`Master: Peer ${peerUuid} is dead, broadcasting cleanup`);
+            deadPeers.push(peerUuid);
+            broadcastDataMessage({
+              type: 'peer-cleanup',
+              deadPeer: peerUuid
+            });
+            cleanupPeer(peerUuid);
+          } else {
+            activePeers.push(peerUuid);
+          }
+        });
+        
+        // Also clean up dead peers from JSONBin as master
+        if (deadPeers.length > 0) {
+          try {
+            const resp = await fetch(SIGNALING_SERVER + '/latest', {
+              headers: { 'X-Master-Key': JSONBIN_API_KEY }
+            });
+            if (resp.ok) {
+              const data = await resp.json();
+              const record = data.record || { peers: {}, messages: {} };
+              
+              // Remove dead peers from server
+              deadPeers.forEach(deadPeer => {
+                delete record.peers[deadPeer];
+                delete record.messages[deadPeer];
+              });
+              
+              await fetch(SIGNALING_SERVER, {
+                method: 'PUT',
+                headers: {
+                  'X-Master-Key': JSONBIN_API_KEY,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(record)
+              });
+              
+              console.log(`Master: Cleaned up ${deadPeers.length} dead peers from server`);
+            }
+          } catch (err) {
+            console.error('Master cleanup error:', err);
+          }
+        }
+        
+        // Broadcast authoritative peer list
+        broadcastDataMessage({
+          type: 'peer-list',
+          peers: activePeers,
+          master: myUuid
+        });
+      }, 5000);
+    }
+    
+    function cleanupPeer(peerUuid) {
+      console.log(`Cleaning up peer ${peerUuid}`);
+      const pc = peers.get(peerUuid);
+      if (pc) {
+        pc.close();
+        peers.delete(peerUuid);
+      }
+      dataChannels.delete(peerUuid);
+      peerLastSeen.delete(peerUuid);
+      
+      const container = document.getElementById(`video-${peerUuid}`);
+      if (container) {
+        container.remove();
+        adjustGridLayout();
+      }
+    }
+    
+    let heartbeatIntervals = new Map();
+    
+    function startHeartbeat(peerUuid) {
+      const interval = setInterval(() => {
+        sendDataMessage(peerUuid, {
+          type: 'heartbeat',
+          from: myUuid,
+          timestamp: Date.now()
+        });
+      }, 3000);
+      heartbeatIntervals.set(peerUuid, interval);
+    }
+    
+    function stopHeartbeat(peerUuid) {
+      const interval = heartbeatIntervals.get(peerUuid);
+      if (interval) {
+        clearInterval(interval);
+        heartbeatIntervals.delete(peerUuid);
+      }
+    }
+    
+    function updateMasterIndicator() {
+      // Update UI to show who is master
+      document.querySelectorAll('.videoContainer').forEach(container => {
+        container.classList.remove('master');
+      });
+      
+      if (masterPeer) {
+        const masterContainer = document.getElementById(`video-${masterPeer}`);
+        if (masterContainer) {
+          masterContainer.classList.add('master');
+        }
+      }
+    }
+    
+    function syncPeerList(authoritivePeers) {
+      // Sync our peer list with master's authoritative list
+      const currentPeers = Array.from(peers.keys());
+      
+      // Remove peers not in authoritative list
+      currentPeers.forEach(peerUuid => {
+        if (!authoritivePeers.includes(peerUuid)) {
+          console.log(`Removing peer ${peerUuid} not in master's list`);
+          cleanupPeer(peerUuid);
+        }
+      });
+    }
+    
+    // Chat functions
+    function toggleChat() {
+      const container = document.getElementById('chatContainer');
+      const toggle = document.getElementById('chatToggle');
+      container.classList.toggle('minimized');
+      toggle.textContent = container.classList.contains('minimized') ? '▲' : '▼';
+    }
+    
+    function sendChat() {
+      const input = document.getElementById('chatInput');
+      const text = input.value.trim();
+      if (!text) return;
+      
+      // Display own message
+      displayChatMessage(myUuid, text, true);
+      
+      // Send to all peers
+      broadcastDataMessage({
+        type: 'chat',
+        from: myUuid,
+        text: text,
+        timestamp: Date.now()
+      });
+      
+      input.value = '';
+    }
+    
+    function handleChatKeypress(event) {
+      if (event.key === 'Enter') {
+        sendChat();
+      }
+    }
+    
+    function displayChatMessage(fromUuid, text, isOwn = false) {
+      const messagesContainer = document.getElementById('chatMessages');
+      const messageDiv = document.createElement('div');
+      messageDiv.className = 'chat-message' + (isOwn ? ' own' : '');
+      
+      if (!isOwn) {
+        const senderDiv = document.createElement('div');
+        senderDiv.className = 'sender';
+        senderDiv.textContent = fromUuid.substring(0, 8);
+        messageDiv.appendChild(senderDiv);
+      }
+      
+      const textDiv = document.createElement('div');
+      textDiv.textContent = text;
+      messageDiv.appendChild(textDiv);
+      
+      messagesContainer.appendChild(messageDiv);
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      
+      // Flash chat icon if minimized and not own message
+      if (!isOwn && document.getElementById('chatContainer').classList.contains('minimized')) {
+        const header = document.querySelector('.chat-header');
+        header.style.background = 'rgba(0, 100, 200, 0.5)';
+        setTimeout(() => {
+          header.style.background = 'rgba(255, 255, 255, 0.1)';
+        }, 1000);
+      }
+    }
+    
     async function createPeerConnection(targetUuid, createOffer) {
       if (peers.has(targetUuid)) {
         console.log(`Already have connection to ${targetUuid}`);
@@ -951,6 +1380,18 @@
       console.log(`Creating peer connection to ${targetUuid}, will create offer: ${createOffer}`);
       const pc = new RTCPeerConnection(iceServers);
       peers.set(targetUuid, pc);
+      
+      // Create data channel for text protocol and chat
+      if (createOffer) {
+        const dc = pc.createDataChannel('chat', { ordered: true });
+        setupDataChannel(dc, targetUuid);
+        dataChannels.set(targetUuid, dc);
+      } else {
+        pc.ondatachannel = (event) => {
+          setupDataChannel(event.channel, targetUuid);
+          dataChannels.set(targetUuid, event.channel);
+        };
+      }
       
       // Monitor connection state
       pc.onconnectionstatechange = () => {
@@ -962,6 +1403,14 @@
           // Clean up dead connection
           pc.close();
           peers.delete(targetUuid);
+          dataChannels.delete(targetUuid);
+          peerLastSeen.delete(targetUuid);
+          
+          // If this was the master, trigger new election
+          if (masterPeer === targetUuid) {
+            masterPeer = null;
+            triggerElection();
+          }
           // Remove their video container
           const container = document.getElementById(`video-${targetUuid}`);
           if (container) {
