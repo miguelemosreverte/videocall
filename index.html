@@ -556,9 +556,15 @@
 
         try {
           if (this.profile === 'mobile') {
-            // Mobile: Load zoomed version only
-            const zoomedImg = await imageCache.preloadImage(selectedImage.zoomedUrl);
-            bgLow.src = zoomedImg.src;
+            // Mobile: Try zoomed version first, fallback to full
+            try {
+              const zoomedImg = await imageCache.preloadImage(selectedImage.zoomedUrl);
+              bgLow.src = zoomedImg.src;
+            } catch (e) {
+              // Fallback to full image
+              const fullImg = await imageCache.preloadImage(selectedImage.url);
+              bgLow.src = fullImg.src;
+            }
             bgLow.classList.add('loaded');
             loadingGradient.classList.add('hidden');
             
@@ -573,7 +579,12 @@
               bgLow.classList.add('loaded');
               loadingGradient.classList.add('hidden');
             } catch (e) {
-              console.log('Zoomed version not available, loading full');
+              console.log('Zoomed version not available, using full image');
+              // Use full image as fallback
+              const fullImg = await imageCache.preloadImage(selectedImage.url);
+              bgLow.src = fullImg.src;
+              bgLow.classList.add('loaded');
+              loadingGradient.classList.add('hidden');
             }
             
             // 2. Load full version in background
@@ -681,6 +692,7 @@
     const dataChannels = new Map();
     let masterPeer = null;
     let electionInProgress = false;
+    let electionTimeout = null;
     const peerLastSeen = new Map();
     let isPolling = false;
     let lastKnownPeers = [];
@@ -1062,9 +1074,12 @@
         // Start heartbeat
         startHeartbeat(peerUuid);
         
-        // Trigger election if we don't have a master
-        if (!masterPeer && !electionInProgress) {
-          triggerElection();
+        // Update last seen
+        peerLastSeen.set(peerUuid, Date.now());
+        
+        // Trigger election if we don't have a master (debounced)
+        if (!masterPeer) {
+          triggerElectionDebounced();
         }
       };
       
@@ -1137,8 +1152,20 @@
       }
     }
     
+    function triggerElectionDebounced() {
+      // Clear any existing election timeout
+      if (electionTimeout) {
+        clearTimeout(electionTimeout);
+      }
+      
+      // Wait a bit to collect all peers before election
+      electionTimeout = setTimeout(() => {
+        triggerElection();
+      }, 1000);
+    }
+    
     function triggerElection() {
-      if (electionInProgress) return;
+      if (electionInProgress || masterPeer) return;
       electionInProgress = true;
       console.log('Starting leader election...');
       
@@ -1170,9 +1197,9 @@
             if (!masterPeer) {
               // Master didn't announce, try again
               electionInProgress = false;
-              triggerElection();
+              triggerElectionDebounced();
             }
-          }, 2000);
+          }, 3000);
         }
         electionInProgress = false;
         updateMasterIndicator();
@@ -1180,8 +1207,13 @@
     }
     
     function startMasterDuties() {
+      // Clean up any existing interval
+      if (masterDutiesInterval) {
+        clearInterval(masterDutiesInterval);
+      }
+      
       // Periodically broadcast peer list and check for dead peers
-      setInterval(async () => {
+      masterDutiesInterval = setInterval(async () => {
         if (masterPeer !== myUuid) return;
         
         const activePeers = [];
@@ -1190,7 +1222,7 @@
         
         // Check for dead peers
         peerLastSeen.forEach((lastSeen, peerUuid) => {
-          if (now - lastSeen > 10000) { // 10 seconds timeout
+          if (now - lastSeen > 15000) { // 15 seconds timeout (increased from 10)
             console.log(`Master: Peer ${peerUuid} is dead, broadcasting cleanup`);
             deadPeers.push(peerUuid);
             broadcastDataMessage({
@@ -1262,6 +1294,7 @@
     }
     
     let heartbeatIntervals = new Map();
+    let masterDutiesInterval = null;
     
     function startHeartbeat(peerUuid) {
       const interval = setInterval(() => {
@@ -1297,14 +1330,22 @@
     }
     
     function syncPeerList(authoritivePeers) {
-      // Sync our peer list with master's authoritative list
+      // Only sync if we're not the master and we trust the master
+      if (masterPeer === myUuid) return;
+      
+      // Don't remove peers that we have active data channels with
       const currentPeers = Array.from(peers.keys());
       
-      // Remove peers not in authoritative list
       currentPeers.forEach(peerUuid => {
         if (!authoritivePeers.includes(peerUuid)) {
-          console.log(`Removing peer ${peerUuid} not in master's list`);
-          cleanupPeer(peerUuid);
+          // Check if we have an active data channel before removing
+          const channel = dataChannels.get(peerUuid);
+          if (!channel || channel.readyState !== 'open') {
+            console.log(`Removing peer ${peerUuid} not in master's list`);
+            cleanupPeer(peerUuid);
+          } else {
+            console.log(`Keeping peer ${peerUuid} - has active data channel`);
+          }
         }
       });
     }
@@ -1409,7 +1450,7 @@
           // If this was the master, trigger new election
           if (masterPeer === targetUuid) {
             masterPeer = null;
-            triggerElection();
+            triggerElectionDebounced();
           }
           // Remove their video container
           const container = document.getElementById(`video-${targetUuid}`);
