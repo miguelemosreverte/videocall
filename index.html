@@ -664,22 +664,12 @@
         // Start polling for peers
         isPolling = true;
         
-        // Connect to existing peers in the room
+        // Connect to existing peers in the room - JUST OFFER TO EVERYONE!
         if (registration.existingPeers && registration.existingPeers.length > 0) {
           console.log('Found existing peers in room:', registration.existingPeers);
           for (const peer of registration.existingPeers) {
-            const shouldInitiate = myUuid.localeCompare(peer) < 0;
-            console.log(`Checking connection to ${peer}: myUuid="${myUuid}" vs peer="${peer}", localeCompare=${myUuid.localeCompare(peer)}, shouldInitiate=${shouldInitiate}`);
-            if (shouldInitiate) {
-              console.log(`WILL CREATE OFFER: Initiating connection to existing peer: ${peer}`);
-              const pc = await createPeerConnection(peer, true);
-              console.log(`Peer connection created for ${peer}, offer should have been sent`);
-            } else {
-              console.log(`WILL WAIT BUT CREATE CONNECTION: ${peer} should initiate to us`);
-              // Still create a connection to be ready for their offer
-              const pc = await createPeerConnection(peer, false);
-              console.log(`Passive connection created for ${peer}, ready for their offer`);
-            }
+            console.log(`Creating offer to ${peer} - let WebRTC handle any race conditions`);
+            await createPeerConnection(peer, true);
           }
         }
         
@@ -807,24 +797,13 @@
           lastKnownPeers = [...activePeers];
         }
         
-        // Create connections for new peers
+        // Create connections for new peers - JUST OFFER TO EVERYONE!
         for (const peerUuid of activePeers) {
           if (peerUuid === myUuid) continue;
           
           if (!peers.has(peerUuid)) {
-            // Only the peer with the lower UUID initiates the connection
-            // This prevents duplicate connections
-            const shouldInitiate = myUuid.localeCompare(peerUuid) < 0;
-            console.log(`New peer ${peerUuid} detected. myUuid="${myUuid}" vs peer="${peerUuid}", shouldInitiate=${shouldInitiate}`);
-            
-            if (shouldInitiate) {
-              console.log(`Initiating connection to ${peerUuid}`);
-              await createPeerConnection(peerUuid, true);
-            } else {
-              // Create a passive connection anyway to be ready
-              console.log(`Creating passive connection for ${peerUuid}`);
-              await createPeerConnection(peerUuid, false);
-            }
+            console.log(`New peer ${peerUuid} detected - creating offer`);
+            await createPeerConnection(peerUuid, true);
           }
         }
 
@@ -832,19 +811,6 @@
         const messages = await pollMessages();
         for (const msg of messages) {
           await handleSignalMessage(msg);
-        }
-        
-        // Failsafe: If we have peers but no connections after multiple polls, force connect
-        for (const peerUuid of activePeers) {
-          if (peerUuid === myUuid) continue;
-          
-          const pc = peers.get(peerUuid);
-          if (pc && !pc.remoteDescription && !pc.localDescription) {
-            console.log(`WARNING: No offer/answer exchanged with ${peerUuid} after polling, forcing offer`);
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            await sendToPeer(peerUuid, 'offer', offer);
-          }
         }
       } catch (err) {
         console.error('Polling error:', err);
@@ -1023,19 +989,10 @@
       try {
         switch (type) {
           case 'peer-entered': {
-            // A new peer joined, we should connect to them if we're the initiator
+            // A new peer joined - just connect to them!
             if (!peers.has(from)) {
-              const comparison = myUuid.localeCompare(from);
-              const shouldInitiate = comparison < 0;
-              console.log(`New peer ${from} entered. myUuid="${myUuid}" vs from="${from}", localeCompare=${comparison}, shouldInitiate=${shouldInitiate}`);
-              if (shouldInitiate) {
-                console.log(`WILL CREATE OFFER: Creating connection to new peer: ${from}`);
-                await createPeerConnection(from, true);
-              } else {
-                // The new peer should initiate to us, but let's create a connection to be ready
-                console.log(`WILL WAIT: Creating passive connection for new peer: ${from}`);
-                await createPeerConnection(from, false);
-              }
+              console.log(`New peer ${from} entered - creating offer`);
+              await createPeerConnection(from, true);
             }
             break;
           }
