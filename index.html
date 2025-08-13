@@ -491,6 +491,8 @@
     const peers = new Map();
     let isPolling = false;
     let lastKnownPeers = [];
+    const processedMessages = new Set();
+    const iceCandidateQueue = new Map(); // Buffer ICE candidates
 
     const iceServers = {
       iceServers: [
@@ -768,7 +770,7 @@
         console.error('Polling error:', err);
       }
 
-      setTimeout(pollLoop, 2000);
+      setTimeout(pollLoop, 5000); // Poll every 5 seconds instead of 2
     }
 
     async function pollMessages() {
@@ -864,7 +866,23 @@
 
       pc.onicecandidate = (event) => {
         if (event.candidate) {
-          sendToPeer(targetUuid, 'ice-candidate', event.candidate);
+          // Queue ICE candidates instead of sending immediately
+          if (!iceCandidateQueue.has(targetUuid)) {
+            iceCandidateQueue.set(targetUuid, []);
+          }
+          iceCandidateQueue.get(targetUuid).push(event.candidate);
+          
+          // Send batched candidates after a delay
+          if (!iceCandidateQueue.get(targetUuid).timer) {
+            iceCandidateQueue.get(targetUuid).timer = setTimeout(async () => {
+              const candidates = iceCandidateQueue.get(targetUuid);
+              if (candidates && candidates.length > 0) {
+                console.log(`Sending ${candidates.length} batched ICE candidates to ${targetUuid}`);
+                await sendToPeer(targetUuid, 'ice-candidates-batch', candidates);
+                iceCandidateQueue.set(targetUuid, []);
+              }
+            }, 500); // Wait 500ms to batch candidates
+          }
         }
       };
 
@@ -891,8 +909,23 @@
 
     async function handleSignalMessage(msg) {
       const { type, data, from } = msg;
+      
+      // Create unique message ID to prevent duplicates
+      const msgId = `${from}-${type}-${JSON.stringify(data).substring(0, 50)}`;
+      if (processedMessages.has(msgId)) {
+        return; // Already processed this message
+      }
+      processedMessages.add(msgId);
+      
+      // Clean old processed messages periodically (keep last 100)
+      if (processedMessages.size > 100) {
+        const messagesToKeep = Array.from(processedMessages).slice(-100);
+        processedMessages.clear();
+        messagesToKeep.forEach(m => processedMessages.add(m));
+      }
+      
       // Only log non-ping/pong messages to reduce spam
-      if (type !== 'ping' && type !== 'pong') {
+      if (type !== 'ping' && type !== 'pong' && type !== 'ice-candidate' && type !== 'ice-candidates-batch') {
         console.log(`Received ${type} from ${from}`);
       }
 
@@ -939,6 +972,20 @@
             }
             if (pc) {
               await pc.addIceCandidate(new RTCIceCandidate(data));
+            }
+            break;
+          }
+          case 'ice-candidates-batch': {
+            const pc = peers.get(from);
+            if (pc && Array.isArray(data)) {
+              console.log(`Received ${data.length} batched ICE candidates from ${from}`);
+              for (const candidate of data) {
+                try {
+                  await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                } catch (err) {
+                  console.error('Error adding ICE candidate:', err);
+                }
+              }
             }
             break;
           }
