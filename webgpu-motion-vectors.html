@@ -869,6 +869,27 @@
       }
     }
     
+    // Helper to compute block variance for edge detection
+    function computeBlockVariance(imageData, x, y, size) {
+      let sum = 0, sumSq = 0, count = 0;
+      const width = 320;
+      
+      for (let dy = 0; dy < size && y + dy < 240; dy++) {
+        for (let dx = 0; dx < size && x + dx < width; dx++) {
+          const idx = ((y + dy) * width + (x + dx)) * 4;
+          const gray = (imageData.data[idx] + imageData.data[idx + 1] + imageData.data[idx + 2]) / 3;
+          sum += gray;
+          sumSq += gray * gray;
+          count++;
+        }
+      }
+      
+      if (count === 0) return 0;
+      const mean = sum / count;
+      const variance = (sumSq / count) - (mean * mean);
+      return variance / 65536; // Normalize
+    }
+    
     // Compute correction events by comparing reference with actual
     function computeCorrectionEvents(currentImageData, referenceImageData, blockSize) {
       const corrections = [];
@@ -902,13 +923,24 @@
           const avgDifference = blockDifference / pixelCount;
           
           // If block has significant difference, send correction
-          // Lower threshold for face regions (center of frame)
+          // Much more sensitive to catch subtle smears
           const centerX = x + blockSize/2;
           const centerY = y + blockSize/2;
           const isLikelyFace = centerX > 100 && centerX < 220 && centerY > 60 && centerY < 180;
-          const threshold = isLikelyFace ? 8 : 15; // More sensitive for face regions
           
-          if (avgDifference > threshold || maxDifference > threshold * 2) {
+          // Even more sensitive thresholds to catch skin-on-wall smears
+          const threshold = isLikelyFace ? 3 : 5; // Very sensitive
+          
+          // Also check for edge/contrast changes that might indicate smearing
+          let hasEdgeChange = false;
+          if (pixelCount > 0) {
+            // Check if this block has lost or gained edges (smear indicator)
+            const currentVariance = computeBlockVariance(currentImageData, x, y, blockSize);
+            const referenceVariance = computeBlockVariance(referenceImageData, x, y, blockSize);
+            hasEdgeChange = Math.abs(currentVariance - referenceVariance) > 0.01;
+          }
+          
+          if (avgDifference > threshold || maxDifference > threshold * 3 || hasEdgeChange) {
             corrections.push({
               x: x,
               y: y,
@@ -1207,23 +1239,41 @@
       eventCount += events.length;
       const now = performance.now();
       if (now - lastEventTime > 1000) {
-        document.getElementById('eventsPerSec').textContent = eventCount;
+        // Keep the events per second display separate
+        const eventsText = eventCount.toString();
+        document.getElementById('eventsPerSec').textContent = eventsText;
         eventCount = 0;
         lastEventTime = now;
       }
 
-      // Calculate data size with adaptive blocks
-      // Each event needs: position (2 bytes), motion (2 bytes), size (1 byte)
+      // Calculate ACTUAL data size that would be transmitted
       let dataSize = 0;
       events.forEach(event => {
-        dataSize += 2 + 2 + 1; // position + motion + size
-        dataSize += (event.size * event.size * 3) / 8; // Actual pixel data (rough estimate)
+        // Metadata: position (2 bytes x,y), motion (2 bytes mvX,mvY), size (1 byte)
+        dataSize += 5;
+        
+        // Actual pixel data for the block
+        // In a real system, this would be compressed (JPEG/WebP), but for accurate calculation:
+        // Each pixel needs RGB (3 bytes), but with JPEG compression at 70% quality, roughly 1/10th
+        const pixelCount = event.size * event.size;
+        const rawBlockSize = pixelCount * 3; // RGB bytes
+        const compressedBlockSize = Math.ceil(rawBlockSize / 10); // JPEG compression estimate
+        dataSize += compressedBlockSize;
       });
-      document.getElementById('dataSize').textContent = (dataSize / 1024).toFixed(2) + ' KB';
       
-      const rawSize = 320 * 240 * 3;
-      document.getElementById('compression').textContent = 
-        dataSize > 0 ? Math.round(rawSize / dataSize) + 'x' : '∞';
+      // Convert to KB
+      const dataSizeKB = dataSize / 1024;
+      document.getElementById('dataSize').textContent = dataSizeKB.toFixed(2) + ' KB/frame';
+      
+      // Raw frame size
+      const rawSize = 320 * 240 * 3; // Uncompressed RGB
+      const compressionRatio = dataSize > 0 ? Math.round(rawSize / dataSize) : 999;
+      document.getElementById('compression').textContent = compressionRatio + 'x';
+      
+      // Show bandwidth estimate in the data size field
+      const bandwidthMbps = (dataSize * 30 * 8) / (1024 * 1024); // Megabits per second
+      document.getElementById('dataSize').textContent = 
+        `${dataSizeKB.toFixed(2)} KB (${bandwidthMbps.toFixed(1)} Mbps)`;
 
       // Apply motion compensation to output
       applyMotionCompensation(events);
