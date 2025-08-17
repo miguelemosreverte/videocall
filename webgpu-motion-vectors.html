@@ -158,6 +158,14 @@
         <option value="20">Less Sensitive</option>
       </select>
       <button id="showVectorsBtn">Show Vectors: ON</button>
+      <button id="showBlocksBtn">Show Blocks: OFF</button>
+      <select id="keyframeInterval">
+        <option value="0">Keyframes: Never</option>
+        <option value="30">Every 1 second</option>
+        <option value="60" selected>Every 2 seconds</option>
+        <option value="150">Every 5 seconds</option>
+        <option value="300">Every 10 seconds</option>
+      </select>
     </div>
 
     <div class="demo-grid">
@@ -229,6 +237,8 @@
     let searchRadius = 8;
     let threshold = 10;
     let showVectors = true;
+    let showBlocks = false; // Default to not showing green squares
+    let keyframeInterval = 60; // Default to every 2 seconds
     let frameCount = 0;
     let lastTime = performance.now();
     let previousFrame = null;
@@ -269,6 +279,17 @@
       showVectors = !showVectors;
       document.getElementById('showVectorsBtn').textContent = `Show Vectors: ${showVectors ? 'ON' : 'OFF'}`;
       document.getElementById('showVectorsBtn').classList.toggle('active', showVectors);
+    };
+    
+    document.getElementById('showBlocksBtn').onclick = () => {
+      showBlocks = !showBlocks;
+      document.getElementById('showBlocksBtn').textContent = `Show Blocks: ${showBlocks ? 'ON' : 'OFF'}`;
+      document.getElementById('showBlocksBtn').classList.toggle('active', showBlocks);
+    };
+    
+    document.getElementById('keyframeInterval').onchange = (e) => {
+      keyframeInterval = parseInt(e.target.value);
+      framesSinceKeyframe = 0; // Reset counter when interval changes
     };
 
     async function initWebGPU() {
@@ -910,10 +931,13 @@
     }
 
     function applyMotionCompensation(events) {
-      // Every 60 frames (~2 seconds), we need a new keyframe
+      // Handle keyframe interval (0 means never)
       framesSinceKeyframe++;
       
-      if (!keyFrame || framesSinceKeyframe > 60) {
+      const needsKeyframe = keyframeInterval > 0 && 
+                           (!keyFrame || framesSinceKeyframe >= keyframeInterval);
+      
+      if (needsKeyframe) {
         // New keyframe needed - this would be transmitted as full image
         keyFrame = currentCtx.getImageData(0, 0, 320, 240);
         framesSinceKeyframe = 0;
@@ -940,8 +964,9 @@
       // If we have a keyframe, show it dimmed as the base
       if (keyFrame) {
         outputCtx.putImageData(keyFrame, 0, 0);
-        // Darken it to show it's old
-        outputCtx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+        // Darken it to show it's old (more darkening for older frames)
+        const darkness = Math.min(0.7, 0.2 + (framesSinceKeyframe / 100) * 0.5);
+        outputCtx.fillStyle = `rgba(0, 0, 0, ${darkness})`;
         outputCtx.fillRect(0, 0, 320, 240);
       }
 
@@ -958,20 +983,32 @@
           event.y + Math.round(event.mvY)
         );
 
-        // Highlight updated blocks to show what's being transmitted
-        outputCtx.strokeStyle = 'rgba(0, 255, 0, 0.5)';
-        outputCtx.lineWidth = 1;
-        outputCtx.strokeRect(
-          event.x + Math.round(event.mvX), 
-          event.y + Math.round(event.mvY), 
-          event.size, event.size
-        );
+        // Only show green blocks if enabled
+        if (showBlocks) {
+          outputCtx.strokeStyle = 'rgba(0, 255, 0, 0.5)';
+          outputCtx.lineWidth = 1;
+          outputCtx.strokeRect(
+            event.x + Math.round(event.mvX), 
+            event.y + Math.round(event.mvY), 
+            event.size, event.size
+          );
+        }
       });
       
       // Show event count overlay
       outputCtx.fillStyle = 'rgba(0, 255, 0, 0.8)';
       outputCtx.font = '12px monospace';
       outputCtx.fillText(`Events: ${events.length}`, 10, 20);
+      
+      // Show time since keyframe if no keyframe set
+      if (keyframeInterval === 0 && !keyFrame) {
+        outputCtx.fillStyle = 'rgba(255, 100, 100, 0.8)';
+        outputCtx.fillText('No keyframe (set to Never)', 10, 35);
+      } else if (keyframeInterval > 0) {
+        const secondsSinceKeyframe = (framesSinceKeyframe / 30).toFixed(1);
+        outputCtx.fillStyle = 'rgba(200, 200, 200, 0.8)';
+        outputCtx.fillText(`${secondsSinceKeyframe}s since keyframe`, 10, 35);
+      }
     }
   </script>
 </body>
