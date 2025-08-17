@@ -3,12 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Forest Friends Video Call - PeerJS</title>
+  <title>Forest Friends Video Call - WebSocket Stream</title>
   <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
-  <!-- PeerJS -->
-  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <style>
     * {
       margin: 0;
@@ -21,64 +19,9 @@
       min-height: 100vh;
       overflow: hidden;
       position: relative;
-      background: #87CEEB;
-    }
-
-    /* Loading states */
-    .background-container {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      z-index: 0;
-    }
-
-    .background-image {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      min-width: 100%;
-      min-height: 100%;
-      width: auto;
-      height: auto;
-      object-fit: cover;
-      opacity: 0;
-      transition: opacity 0.5s ease-in-out;
-    }
-
-    .background-image.loaded {
-      opacity: 1;
-    }
-
-    .background-image.animated {
-      animation: slowZoom 60s ease-in-out infinite alternate;
-    }
-
-    @keyframes slowZoom {
-      0% { transform: translate(-50%, -50%) scale(1); }
-      100% { transform: translate(-50%, -50%) scale(1.3); }
-    }
-
-    /* Loading gradient while image loads */
-    .loading-gradient {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
       background: linear-gradient(135deg, #87CEEB 0%, #98D98E 50%, #90EE90 100%);
-      opacity: 1;
-      transition: opacity 1s ease-out;
     }
 
-    .loading-gradient.hidden {
-      opacity: 0;
-      pointer-events: none;
-    }
-
-    /* Main content */
     .container {
       position: relative;
       z-index: 10;
@@ -93,7 +36,7 @@
     .avatar-grid {
       display: flex;
       justify-content: center;
-      gap: clamp(30px, 5vw, 60px);
+      gap: 30px;
       flex-wrap: wrap;
     }
 
@@ -108,8 +51,8 @@
     }
 
     .avatar-image {
-      width: clamp(100px, 15vw, 140px);
-      height: clamp(100px, 15vw, 140px);
+      width: 120px;
+      height: 120px;
       border-radius: 50%;
       object-fit: cover;
       border: 4px solid transparent;
@@ -127,8 +70,12 @@
       box-shadow: 0 0 0 3px rgba(74, 124, 32, 0.2);
     }
 
-    .hidden {
-      display: none !important;
+    .status-message {
+      margin-top: 20px;
+      padding: 10px 20px;
+      background: rgba(255,255,255,0.9);
+      border-radius: 10px;
+      font-size: 14px;
     }
 
     .error-message {
@@ -144,12 +91,13 @@
       width: 100%;
       height: 100vh;
       background: rgba(0,0,0,0.8);
-      padding: 10px;
+      padding: 20px;
+      grid-gap: 15px;
       position: fixed;
       top: 0;
       left: 0;
       z-index: 100;
-      transition: all 0.3s ease;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
     }
 
     .videoContainer {
@@ -158,108 +106,12 @@
       border-radius: 15px;
       overflow: hidden;
       box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-      cursor: pointer;
-      transition: all 0.3s ease;
-    }
-
-    .videoContainer:hover {
-      transform: scale(1.02);
-      box-shadow: 0 15px 40px rgba(0,0,0,0.4);
     }
 
     .videoContainer video {
       width: 100%;
       height: 100%;
       object-fit: cover;
-    }
-
-    /* Focus states */
-    .videoContainer.focused {
-      position: fixed !important;
-      top: 10px;
-      left: 10px;
-      right: 10px;
-      bottom: 10px;
-      z-index: 200;
-      transform: none;
-    }
-
-    .videoContainer.minimized {
-      position: fixed !important;
-      width: 150px !important;
-      height: 100px !important;
-      top: 20px;
-      right: 20px;
-      z-index: 300;
-    }
-
-    .videoContainer.thumbnail {
-      position: fixed !important;
-      width: 120px !important;
-      height: 80px !important;
-      z-index: 250;
-    }
-
-    /* Mobile layouts */
-    @media (max-width: 768px) {
-      #videoGrid {
-        padding: 5px;
-      }
-      
-      .videoContainer.minimized {
-        width: 120px !important;
-        height: 80px !important;
-        top: 10px;
-        right: 10px;
-      }
-      
-      .videoContainer.thumbnail {
-        width: 100px !important;
-        height: 70px !important;
-      }
-      
-      .videoContainer.focused {
-        top: 5px;
-        left: 5px;
-        right: 5px;
-        bottom: 100px; /* Leave space for thumbnails */
-      }
-    }
-
-    /* Portrait orientation */
-    @media (max-width: 768px) and (orientation: portrait) {
-      .thumbnail-strip {
-        position: fixed;
-        bottom: 10px;
-        left: 10px;
-        right: 10px;
-        height: 90px;
-        display: flex;
-        gap: 10px;
-        justify-content: center;
-        z-index: 250;
-      }
-    }
-
-    /* Landscape orientation */
-    @media (max-width: 768px) and (orientation: landscape) {
-      .videoContainer.focused {
-        right: 130px; /* Leave space for side thumbnails */
-        bottom: 5px;
-      }
-      
-      .thumbnail-strip {
-        position: fixed;
-        top: 10px;
-        right: 10px;
-        bottom: 10px;
-        width: 110px;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        justify-content: flex-start;
-        z-index: 250;
-      }
     }
 
     .peerId {
@@ -274,94 +126,26 @@
       z-index: 10;
     }
 
-    .video-controls {
+    .connection-status {
       position: absolute;
-      bottom: 5px;
-      right: 5px;
-      display: flex;
-      gap: 5px;
-      z-index: 10;
-      transition: all 0.3s ease;
-    }
-
-    .control-btn {
-      background: rgba(0,0,0,0.6);
+      top: 10px;
+      right: 10px;
+      padding: 5px 10px;
+      background: rgba(0,0,0,0.7);
       color: white;
-      border: none;
-      padding: 6px 8px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 14px;
-      transition: all 0.3s;
-      min-width: 30px;
-      min-height: 30px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      border-radius: 5px;
+      font-size: 12px;
     }
 
-    .control-btn:hover {
-      background: rgba(0,0,0,0.8);
-      transform: scale(1.1);
-    }
-
-    .control-btn.muted {
-      background: rgba(255,0,0,0.6);
-    }
-
-    /* Small video controls */
-    .videoContainer.minimized .video-controls {
-      bottom: 2px;
-      right: 2px;
-      gap: 2px;
-    }
-
-    .videoContainer.minimized .control-btn {
-      padding: 3px 4px;
-      font-size: 10px;
-      min-width: 20px;
-      min-height: 20px;
-      border-radius: 3px;
-    }
-
-    .videoContainer.thumbnail .video-controls {
-      bottom: 2px;
-      right: 2px;
-      gap: 2px;
-    }
-
-    .videoContainer.thumbnail .control-btn {
-      padding: 2px 3px;
-      font-size: 8px;
-      min-width: 16px;
-      min-height: 16px;
-      border-radius: 2px;
-    }
-
-    /* Hide controls on very small containers to prevent overlap */
-    @media (max-width: 768px) {
-      .videoContainer.minimized .video-controls,
-      .videoContainer.thumbnail .video-controls {
-        opacity: 0;
-        pointer-events: none;
-      }
-      
-      .videoContainer.minimized:hover .video-controls,
-      .videoContainer.thumbnail:hover .video-controls {
-        opacity: 1;
-        pointer-events: all;
-      }
-    }
+    .status-good { background: rgba(0,128,0,0.7); }
+    .status-poor { background: rgba(255,165,0,0.7); }
+    .status-bad { background: rgba(255,0,0,0.7); }
   </style>
 </head>
 <body>
-  <div class="background-container">
-    <div class="loading-gradient" id="loadingGradient"></div>
-    <img class="background-image" id="backgroundImage" />
-  </div>
-
   <div class="container">
     <div class="avatar-grid" id="userSelection"></div>
+    <div class="status-message" id="statusMessage"></div>
     <div class="error-message" id="errorMessage"></div>
   </div>
 
@@ -391,59 +175,22 @@
 
     let myUuid = null;
     let localStream = null;
-    let peer = null;
-    const activeCalls = new Map();
-    let focusedUser = null;
-    let isMobile = window.innerWidth <= 768;
+    let mediaRecorder = null;
+    let audioContext = null;
+    let audioProcessor = null;
+    let sequenceNumbers = new Map();
+    let chunkBuffers = new Map(); // Store chunks until we have enough for a segment
 
     // Initialize
-    window.addEventListener('load', async () => {
-      loadBackgroundImage();
+    window.addEventListener('load', () => {
       showUserSelection(users);
+      updateStatus('Select your avatar to join');
     });
-
-    function loadBackgroundImage() {
-      const images = [
-        { url: 'assets/trees/Line-000001.png', webp: 'assets/trees/Line-000001.webp' },
-        { url: 'assets/trees/Line-000002.png', webp: 'assets/trees/Line-000002.webp' },
-        { url: 'assets/trees/Line-000003.png', webp: 'assets/trees/Line-000003.webp' },
-        { url: 'assets/trees/Line-000004.png', webp: 'assets/trees/Line-000004.webp' },
-        { url: 'assets/trees/Line-000005.png', webp: 'assets/trees/Line-000005.webp' },
-        { url: 'assets/trees/Line-000006.png', webp: 'assets/trees/Line-000006.webp' },
-        { url: 'assets/trees/Line-000007.png', webp: 'assets/trees/Line-000007.webp' },
-        { url: 'assets/trees/Line-000008.png', webp: 'assets/trees/Line-000008.webp' },
-        { url: 'assets/trees/Line-000009.png', webp: 'assets/trees/Line-000009.webp' },
-        { url: 'assets/trees/Line-000010.png', webp: 'assets/trees/Line-000010.webp' },
-        { url: 'assets/trees/Line-000011.png', webp: 'assets/trees/Line-000011.webp' },
-        { url: 'assets/trees/Line-000012.png', webp: 'assets/trees/Line-000012.webp' },
-        { url: 'assets/trees/Line-000013.png', webp: 'assets/trees/Line-000013.webp' }
-      ];
-      
-      const randomImage = images[Math.floor(Math.random() * images.length)];
-      const img = document.getElementById('backgroundImage');
-      const loadingGradient = document.getElementById('loadingGradient');
-      
-      // Try WebP first, fallback to PNG
-      const supportsWebP = document.createElement('canvas').toDataURL('image/webp').indexOf('data:image/webp') === 0;
-      img.src = supportsWebP && randomImage.webp ? randomImage.webp : randomImage.url;
-      
-      img.onload = () => {
-        img.classList.add('loaded');
-        loadingGradient.classList.add('hidden');
-        // Add zoom animation on desktop
-        if (window.innerWidth > 768) {
-          setTimeout(() => img.classList.add('animated'), 500);
-        }
-      };
-      
-      img.onerror = () => {
-        // Fallback to PNG if WebP fails
-        if (img.src.includes('.webp')) {
-          img.src = randomImage.url;
-        }
-      };
-    }
     
+    function updateStatus(message) {
+      document.getElementById('statusMessage').textContent = message;
+    }
+
     function showUserSelection(allUsers) {
       const userSelectionDiv = document.getElementById('userSelection');
       userSelectionDiv.innerHTML = '';
@@ -465,8 +212,8 @@
           
           myUuid = u.name;
           document.getElementById('errorMessage').textContent = '';
+          updateStatus('Joining...');
           
-          // Immediately join the call
           setTimeout(() => joinCall(), 100);
         };
 
@@ -482,436 +229,662 @@
       }
 
       try {
-        // Get camera/mic
+        updateStatus('Requesting camera and microphone...');
+        
+        // Get camera/mic with balanced settings
         localStream = await navigator.mediaDevices.getUserMedia({ 
-          video: true, 
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 30 }
+          }, 
           audio: true 
         });
 
-        // Initialize PeerJS with our username as ID
-        peer = new Peer(myUuid, {
-          config: {
-            iceServers: [
-              { urls: 'stun:stun.l.google.com:19302' },
-              { urls: 'stun:stun1.l.google.com:19302' }
-            ]
+        updateStatus('Starting video encoder...');
+
+        // Switch to video view
+        document.querySelector('.container').style.display = 'none';
+        const videoGrid = document.getElementById('videoGrid');
+        videoGrid.style.display = 'grid';
+
+        // Add local video
+        createVideoContainer(myUuid, localStream, true);
+
+        // Register with Firebase
+        await registerPeer(myUuid);
+        
+        // Listen for other peers first
+        listenForPeers();
+        
+        // Listen for incoming streams
+        listenForStreams();
+        
+        // Check for existing peers and create containers
+        const existingPeers = await getActivePeers();
+        console.log('Found existing peers:', existingPeers);
+        existingPeers.forEach(peerId => {
+          console.log('Creating video container for existing peer:', peerId);
+          // Create placeholder for existing peer
+          if (!document.getElementById(`video-${peerId}`)) {
+            createRemoteVideo(peerId);
           }
         });
-
-        peer.on('open', async (id) => {
-          console.log('My peer ID is: ' + id);
-          
-          // Register in Firebase for discovery
-          await registerPeer(id);
-          
-          // Switch to video view
-          document.querySelector('.container').style.display = 'none';
-          const videoGrid = document.getElementById('videoGrid');
-          videoGrid.style.display = 'grid';
-          videoGrid.style.gridTemplateColumns = '1fr';
-
-          // Add local video
-          createVideoContainer(myUuid, localStream, true);
-          
-          // Get existing peers and call them
-          const existingPeers = await getActivePeers();
-          existingPeers.forEach(peerId => {
-            if (peerId !== myUuid) {
-              console.log('Calling peer:', peerId);
-              const call = peer.call(peerId, localStream);
-              handleCall(call, peerId);
-            }
-          });
-        });
-
-        // Handle incoming calls
-        peer.on('call', (call) => {
-          console.log('Incoming call from:', call.peer);
-          call.answer(localStream);
-          handleCall(call, call.peer);
-        });
-
-        peer.on('error', (err) => {
-          console.error('PeerJS error:', err);
-          document.getElementById('errorMessage').textContent = 'Connection error: ' + err.type;
-        });
+        
+        // Also check for any existing streams
+        const streamsSnapshot = await database.ref('streams').once('value');
+        const allStreams = streamsSnapshot.val() || {};
+        console.log('Existing streams in database:', Object.keys(allStreams));
+        
+        // Start streaming to Firebase
+        startStreaming();
+        // startAudioStreaming(); // Disabled for now
+        
+        updateStatus('Connected - Using WebSocket streaming');
 
       } catch (err) {
         console.error('Error:', err);
         document.getElementById('errorMessage').textContent = 'Error: ' + err.message;
+        updateStatus('Failed to connect');
       }
     }
 
-    function handleCall(call, peerId) {
-      // Store the call
-      activeCalls.set(peerId, call);
+    function startAudioStreaming() {
+      if (!localStream) return;
       
-      // Handle remote stream
-      call.on('stream', (remoteStream) => {
-        console.log('Received stream from:', peerId);
-        createVideoContainer(peerId, remoteStream, false);
-      });
-
-      // Handle call close
-      call.on('close', () => {
-        console.log('Call closed with:', peerId);
-        removeVideoContainer(peerId);
-        activeCalls.delete(peerId);
-      });
-
-      call.on('error', (err) => {
-        console.error('Call error with', peerId, ':', err);
-      });
-    }
-
-    async function registerPeer(peerId) {
+      const audioTrack = localStream.getAudioTracks()[0];
+      if (!audioTrack) {
+        console.log('No audio track available');
+        return;
+      }
+      
       try {
-        await database.ref(`peers/${peerId}`).set({
-          timestamp: Date.now(),
-          name: peerId
+        // Use MediaRecorder to create playable audio segments
+        const audioStream = new MediaStream([audioTrack]);
+        const audioRecorder = new MediaRecorder(audioStream, {
+          mimeType: 'audio/webm;codecs=opus',
+          audioBitsPerSecond: 64000 // Higher bitrate for better quality
         });
         
-        // Clean up on disconnect
-        database.ref(`peers/${peerId}`).onDisconnect().remove();
+        let audioSequence = 0;
+        let audioChunks = [];
         
-        console.log('Registered in Firebase:', peerId);
-      } catch (error) {
-        console.error('Firebase registration error:', error);
+        audioRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            audioChunks.push(event.data);
+          }
+        };
+        
+        // Every 200ms, send accumulated audio as a playable segment
+        setInterval(async () => {
+          if (audioChunks.length > 0) {
+            // Combine all chunks into one blob
+            const audioBlob = new Blob(audioChunks, { type: 'audio/webm;codecs=opus' });
+            audioChunks = []; // Clear for next segment
+            
+            // Convert to base64
+            const reader = new FileReader();
+            reader.onloadend = async () => {
+              const dataUrl = reader.result;
+              const base64 = dataUrl.split(',')[1];
+              
+              if (!base64 || base64.length > 100000) {
+                console.warn('Audio segment issue:', base64 ? base64.length : 'no data');
+                return;
+              }
+              
+              const audioData = {
+                s: audioSequence++,
+                d: base64,
+                t: Date.now()
+              };
+              
+              // Send to all active peers except self
+              const activePeers = await getActivePeers();
+              for (const peerId of activePeers) {
+                if (peerId !== myUuid) {
+                  database.ref(`streams/${peerId}/audio_${myUuid}`).set(audioData)
+                    .catch(e => console.error(`Failed to send audio to ${peerId}:`, e));
+                }
+              }
+            };
+            reader.readAsDataURL(audioBlob);
+          }
+        }, 200);
+        
+        // Start recording continuous stream
+        audioRecorder.start();
+        console.log('Started audio streaming');
+        
+      } catch (e) {
+        console.error('Failed to start audio streaming:', e);
+      }
+    }
+    
+    function startStreaming() {
+      if (!localStream) return;
+
+      // Create a canvas to capture frames
+      const video = document.createElement('video');
+      video.srcObject = localStream;
+      video.play();
+      
+      // Balance quality and performance
+      const canvas = document.createElement('canvas');
+      canvas.width = 1280; // HD resolution, not Full HD for better performance
+      canvas.height = 720;
+      const ctx = canvas.getContext('2d', { 
+        alpha: false,
+        desynchronized: true, // Reduce latency
+        willReadFrequently: true
+      });
+      
+      let frameNumber = 0;
+      let isCapturing = false; // Prevent overlapping captures
+      
+      // Wait for video to be ready
+      video.onloadedmetadata = () => {
+        console.log('Video ready, starting HD frame capture');
+        
+        // Capture and send frames
+        const captureFrame = async () => {
+          if (!localStream.active || isCapturing) {
+            return; // Skip if already capturing
+          }
+          
+          isCapturing = true;
+          
+          try {
+            // Draw current frame to canvas
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // Convert canvas to base64
+            // Simple, fast encoding
+            let quality = 0.7; // Lower quality for faster encoding
+            let dataUrl = canvas.toDataURL('image/jpeg', quality);
+            let base64 = dataUrl.split(',')[1];
+            
+            // Only reduce if absolutely necessary
+            if (base64.length > 200000) {
+              quality = 0.5;
+              dataUrl = canvas.toDataURL('image/jpeg', quality);
+              base64 = dataUrl.split(',')[1];
+            }
+            
+            // Send frame to all peers
+            const frame = {
+              s: frameNumber++,  // Shorter key names to reduce data size
+              d: base64,
+              t: Date.now()
+            };
+            
+            const activePeers = await getActivePeers();
+            
+            // Send frames directly without waiting (skip self)
+            for (const peerId of activePeers) {
+              if (peerId !== myUuid) {
+                database.ref(`streams/${peerId}/frame_${myUuid}`).set(frame);
+              }
+            }
+          } catch (e) {
+            console.error('Error capturing frame:', e);
+          } finally {
+            isCapturing = false; // Always reset flag
+          }
+        };
+        
+        // Use setInterval for consistent timing
+        const captureInterval = setInterval(() => {
+          if (!localStream.active) {
+            clearInterval(captureInterval);
+            return;
+          }
+          captureFrame();
+        }, 40); // 25 FPS for good balance
+        
+        console.log('Started HD streaming at 25 FPS');
+      };
+    }
+
+    function listenForStreams() {
+      console.log(`Setting up stream listeners for ${myUuid}`);
+      
+      // Listen for incoming stream chunks
+      const streamRef = database.ref(`streams/${myUuid}`);
+      
+      streamRef.on('child_added', (snapshot) => {
+        const key = snapshot.key;
+        // Extract senderId from frame_Miguel or audio_Miguel format
+        let senderId = null;
+        if (key.startsWith('frame_')) {
+          senderId = key.replace('frame_', '');
+        } else if (key.startsWith('audio_')) {
+          senderId = key.replace('audio_', '');
+        } else {
+          return; // Unknown format
+        }
+        
+        console.log(`New stream detected from ${senderId}`);
+        if (senderId === myUuid) return;
+        
+        // Skip listening to self
+        if (senderId === myUuid) return;
+        
+        // Listen for video frames from this sender
+        const frameRef = database.ref(`streams/${myUuid}/frame_${senderId}`);
+        frameRef.on('value', (frameSnapshot) => {
+          const frame = frameSnapshot.val();
+          if (frame && frame.d) {
+            handleIncomingFrame(senderId, frame);
+          }
+        });
+        
+        // Listen for audio chunks from this sender (skip self)
+        if (senderId !== myUuid) {
+          const audioRef = database.ref(`streams/${myUuid}/audio_${senderId}`);
+          audioRef.on('value', (audioSnapshot) => {
+            const audioChunk = audioSnapshot.val();
+            if (audioChunk && audioChunk.d) {
+              handleIncomingAudio(senderId, audioChunk);
+            }
+          });
+        }
+      });
+      
+      // Also check for any existing streams
+      streamRef.once('value', (snapshot) => {
+        const streams = snapshot.val();
+        if (streams) {
+          Object.keys(streams).forEach(senderId => {
+            if (senderId !== myUuid) {
+              console.log(`Found existing stream from ${senderId}`);
+              // Skip self
+              if (senderId === myUuid) return;
+              
+              const frameRef = database.ref(`streams/${myUuid}/frame_${senderId}`);
+              frameRef.on('value', (frameSnapshot) => {
+                const frame = frameSnapshot.val();
+                if (frame && frame.d) {
+                  handleIncomingFrame(senderId, frame);
+                }
+              });
+              
+              // Only listen to audio from others
+              if (senderId !== myUuid) {
+                const audioRef = database.ref(`streams/${myUuid}/audio_${senderId}`);
+                audioRef.on('value', (audioSnapshot) => {
+                  const audioChunk = audioSnapshot.val();
+                  if (audioChunk && audioChunk.d) {
+                    handleIncomingAudio(senderId, audioChunk);
+                  }
+                });
+              }
+            }
+          });
+        }
+      });
+    }
+
+    // Store audio elements for each sender
+    const audioElements = new Map();
+    const audioQueues = new Map();
+    
+    function handleIncomingAudio(senderId, audioChunk) {
+      // Don't play your own audio
+      if (senderId === myUuid) {
+        console.log('Skipping own audio');
+        return;
+      }
+      
+      try {
+        // Get or create audio element for this sender
+        let audio = audioElements.get(senderId);
+        if (!audio) {
+          audio = document.createElement('audio');
+          audio.autoplay = true;
+          audio.style.display = 'none';
+          
+          // Check if user has already muted this sender
+          const muteBtn = document.querySelector(`#video-${senderId} .control-btn`);
+          if (muteBtn && muteBtn.classList.contains('muted')) {
+            audio.muted = true;
+          }
+          
+          document.body.appendChild(audio);
+          audioElements.set(senderId, audio);
+          audioQueues.set(senderId, []);
+          
+          // Set up ended handler once
+          audio.onended = () => {
+            const q = audioQueues.get(senderId);
+            if (q && q.length > 0) {
+              const nextSegment = q.shift();
+              audio.src = nextSegment;
+              audio.play().catch(e => console.log('Queue playback failed:', e));
+            }
+          };
+        }
+        
+        // Create audio URL from base64
+        const audioUrl = `data:audio/webm;base64,${audioChunk.d || audioChunk.data}`;
+        
+        // Add to queue
+        const queue = audioQueues.get(senderId);
+        queue.push(audioUrl);
+        
+        // If audio is not playing and we have segments, start playing
+        if ((audio.paused || audio.ended) && queue.length > 0) {
+          const nextSegment = queue.shift();
+          audio.src = nextSegment;
+          audio.play().catch(e => {
+            console.log('Audio playback failed:', e);
+            // Don't try muted audio - that defeats the purpose
+          });
+        }
+        
+      } catch (e) {
+        console.error('Failed to handle audio:', e);
+      }
+    }
+    
+    function handleIncomingFrame(senderId, frame) {
+      // Don't display your own video feed from Firebase
+      if (senderId === myUuid) {
+        console.log('Skipping own frame');
+        return;
+      }
+      
+      // Create video container if doesn't exist
+      if (!document.getElementById(`video-${senderId}`)) {
+        createRemoteVideo(senderId);
+      }
+      
+      // Decode and display frame as image
+      try {
+        const container = document.getElementById(`video-${senderId}`);
+        if (!container) return;
+        
+        // Find or create img element for streaming frames
+        let img = container.querySelector('img.video-frame');
+        if (!img) {
+          // Hide the video element and replace with img
+          const video = container.querySelector('video');
+          if (video) {
+            video.style.display = 'none';
+          }
+          
+          img = document.createElement('img');
+          img.className = 'video-frame';
+          img.style.width = '100%';
+          img.style.height = '100%';
+          img.style.objectFit = 'cover';
+          img.style.position = 'absolute';
+          img.style.top = '0';
+          img.style.left = '0';
+          container.appendChild(img);
+        }
+        
+        // Use the shortened key names (d for data, s for sequence)
+        const data = frame.d || frame.data;
+        const sequence = frame.s !== undefined ? frame.s : frame.sequence;
+        
+        if (!data) {
+          console.error('No data in frame:', frame);
+          return;
+        }
+        
+        // Directly set the image as data URL (always JPEG)
+        img.src = `data:image/jpeg;base64,${data}`;
+        
+        // Update connection status to show frame received
+        const status = container.querySelector('.connection-status');
+        if (status) {
+          status.textContent = `Frame ${sequence}`;
+        }
+      } catch (e) {
+        console.error('Failed to display frame:', e);
+      }
+    }
+    
+    function handleIncomingChunk(senderId, chunk) {
+      console.log(`Received chunk ${chunk.sequence} from ${senderId}`);
+      
+      // Check sequence number to avoid duplicates
+      const lastSequence = sequenceNumbers.get(senderId) || -1;
+      if (chunk.sequence <= lastSequence) {
+        console.log(`Skipping duplicate chunk ${chunk.sequence}`);
+        return;
+      }
+      sequenceNumbers.set(senderId, chunk.sequence);
+
+      // Create video element if doesn't exist
+      if (!document.getElementById(`video-${senderId}`)) {
+        createRemoteVideo(senderId);
+      }
+
+      // Initialize buffer for this sender if needed
+      if (!chunkBuffers.has(senderId)) {
+        chunkBuffers.set(senderId, {
+          chunks: [],
+          lastUpdate: 0
+        });
+      }
+
+      // Decode chunk
+      let bytes;
+      try {
+        const binaryData = atob(chunk.data);
+        bytes = new Uint8Array(binaryData.length);
+        for (let i = 0; i < binaryData.length; i++) {
+          bytes[i] = binaryData.charCodeAt(i);
+        }
+      } catch (e) {
+        console.error('Failed to decode base64 chunk:', e);
+        console.error('Chunk info:', {
+          size: chunk.size,
+          dataLength: chunk.data ? chunk.data.length : 0,
+          preview: chunk.data ? chunk.data.substring(0, 100) : 'null',
+          sequence: chunk.sequence
+        });
+        return;
+      }
+      
+      // Add to buffer
+      const buffer = chunkBuffers.get(senderId);
+      buffer.chunks.push(bytes);
+      
+      // Every 2 seconds worth of chunks (4 chunks at 500ms each), create a playable segment
+      if (buffer.chunks.length >= 4) {
+        // Combine all chunks into one blob
+        const combinedLength = buffer.chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+        const combined = new Uint8Array(combinedLength);
+        let offset = 0;
+        for (const chunk of buffer.chunks) {
+          combined.set(chunk, offset);
+          offset += chunk.length;
+        }
+        
+        // Create blob and play
+        const blob = new Blob([combined], { type: chunk.mimeType || 'video/webm' });
+        const video = document.querySelector(`#video-${senderId} video`);
+        
+        if (video) {
+          const url = URL.createObjectURL(blob);
+          
+          // Only update if enough time has passed (prevent interrupting current playback)
+          const now = Date.now();
+          if (now - buffer.lastUpdate > 1500) {
+            video.src = url;
+            video.play().catch(e => {
+              console.log('Play failed, trying muted:', e);
+              video.muted = true;
+              video.play().catch(e2 => console.error('Still cannot play:', e2));
+            });
+            buffer.lastUpdate = now;
+          }
+          
+          // Clean up
+          setTimeout(() => URL.revokeObjectURL(url), 10000);
+        }
+        
+        // Clear buffer for next segment
+        buffer.chunks = [];
       }
     }
 
-    async function getActivePeers() {
-      try {
-        const snapshot = await database.ref('peers').once('value');
-        const peers = snapshot.val() || {};
-        return Object.keys(peers).filter(id => id !== myUuid);
-      } catch (error) {
-        console.error('Error getting peers:', error);
-        return [];
-      }
+
+    function createRemoteVideo(senderId) {
+      const container = document.createElement('div');
+      container.className = 'videoContainer';
+      container.id = `video-${senderId}`;
+
+      // Create placeholder video element (will be hidden when frames arrive)
+      const video = document.createElement('video');
+      video.autoplay = true;
+      video.playsInline = true;
+      video.muted = false;
+
+      const label = document.createElement('div');
+      label.className = 'peerId';
+      const user = users.find(u => u.name === senderId);
+      label.textContent = user ? `${user.emoji} ${senderId}` : senderId;
+
+      const status = document.createElement('div');
+      status.className = 'connection-status status-good';
+      status.textContent = 'Waiting for frames...';
+
+      // Add mute controls for remote audio
+      const controls = document.createElement('div');
+      controls.className = 'video-controls';
+      
+      const muteBtn = document.createElement('button');
+      muteBtn.className = 'control-btn';
+      muteBtn.innerHTML = '🔊';
+      muteBtn.title = `Mute/Unmute ${senderId}'s audio`;
+      muteBtn.onclick = () => {
+        // Mute the audio element for this user
+        const audio = audioElements.get(senderId);
+        if (audio) {
+          audio.muted = !audio.muted;
+          muteBtn.classList.toggle('muted');
+          muteBtn.innerHTML = audio.muted ? '🔇' : '🔊';
+        } else {
+          // If no audio element yet, store mute preference
+          muteBtn.classList.toggle('muted');
+          muteBtn.innerHTML = muteBtn.classList.contains('muted') ? '🔇' : '🔊';
+        }
+      };
+      
+      controls.appendChild(muteBtn);
+      container.appendChild(controls);
+
+      container.appendChild(video);
+      container.appendChild(label);
+      container.appendChild(status);
+      
+      document.getElementById('videoGrid').appendChild(container);
+      console.log(`Created video container for ${senderId}`);
     }
 
     function createVideoContainer(uuid, stream, isLocal) {
-      let container = document.getElementById(`video-${uuid}`);
-      
-      if (!container) {
-        container = document.createElement('div');
-        container.className = 'videoContainer';
-        container.id = `video-${uuid}`;
+      const container = document.createElement('div');
+      container.className = 'videoContainer';
+      container.id = `video-${uuid}`;
 
-        const video = document.createElement('video');
-        video.autoplay = true;
-        video.playsInline = true;
-        video.muted = isLocal; // Only mute local video
-
-        const label = document.createElement('div');
-        label.className = 'peerId';
-        const user = users.find(u => u.name === uuid);
-        label.textContent = user ? `${user.emoji} ${uuid}` : uuid;
-        if (isLocal) label.textContent += ' (You)';
-
-        container.appendChild(video);
-        container.appendChild(label);
-        
-        // Add mute button
-        const controls = document.createElement('div');
-        controls.className = 'video-controls';
-        
-        if (isLocal) {
-          const muteBtn = document.createElement('button');
-          muteBtn.className = 'control-btn';
-          muteBtn.innerHTML = '🎤';
-          muteBtn.onclick = () => {
-            const audioTrack = localStream.getAudioTracks()[0];
-            if (audioTrack) {
-              audioTrack.enabled = !audioTrack.enabled;
-              muteBtn.classList.toggle('muted');
-              muteBtn.innerHTML = audioTrack.enabled ? '🎤' : '🔇';
-            }
-          };
-          controls.appendChild(muteBtn);
-        } else {
-          // Mute button for remote users
-          const muteBtn = document.createElement('button');
-          muteBtn.className = 'control-btn';
-          muteBtn.innerHTML = '🔊';
-          muteBtn.title = 'Mute/Unmute ' + uuid;
-          muteBtn.onclick = () => {
-            const audioTracks = stream.getAudioTracks();
-            if (audioTracks.length > 0) {
-              const audioTrack = audioTracks[0];
-              audioTrack.enabled = !audioTrack.enabled;
-              muteBtn.classList.toggle('muted');
-              muteBtn.innerHTML = audioTrack.enabled ? '🔊' : '🔇';
-            }
-          };
-          controls.appendChild(muteBtn);
-        }
-        
-        // Add click to focus functionality
-        container.onclick = (e) => {
-          // Don't trigger on button clicks
-          if (e.target.tagName === 'BUTTON') return;
-          toggleFocus(uuid);
-        };
-        
-        container.appendChild(controls);
-        document.getElementById('videoGrid').appendChild(container);
-        
-        adjustGridLayout();
-        
-        // On mobile, auto-minimize local user after a delay
-        if (isMobile && isLocal && document.querySelectorAll('.videoContainer').length > 1) {
-          setTimeout(() => {
-            if (!focusedUser) {
-              adjustGridLayout();
-            }
-          }, 1000);
-        }
-      }
-
-      const video = container.querySelector('video');
+      const video = document.createElement('video');
+      video.autoplay = true;
+      video.playsInline = true;
+      video.muted = isLocal;
       video.srcObject = stream;
-    }
 
-    function removeVideoContainer(uuid) {
-      const container = document.getElementById(`video-${uuid}`);
-      if (container) {
-        container.remove();
-        adjustGridLayout();
-      }
-    }
+      const label = document.createElement('div');
+      label.className = 'peerId';
+      const user = users.find(u => u.name === uuid);
+      label.textContent = user ? `${user.emoji} ${uuid}` : uuid;
+      if (isLocal) label.textContent += ' (You)';
 
-    function adjustGridLayout() {
-      if (focusedUser) {
-        setupFocusLayout();
-        return;
+      const status = document.createElement('div');
+      status.className = 'connection-status status-good';
+      status.textContent = isLocal ? 'Local' : 'WebSocket Stream';
+
+      // Add mute controls
+      const controls = document.createElement('div');
+      controls.className = 'video-controls';
+      
+      const muteBtn = document.createElement('button');
+      muteBtn.className = 'control-btn';
+      
+      if (isLocal) {
+        // Mute button for local user (mute microphone)
+        muteBtn.innerHTML = '🎤';
+        muteBtn.title = 'Mute/Unmute microphone';
+        muteBtn.onclick = () => {
+          const audioTrack = stream.getAudioTracks()[0];
+          if (audioTrack) {
+            audioTrack.enabled = !audioTrack.enabled;
+            muteBtn.classList.toggle('muted');
+            muteBtn.innerHTML = audioTrack.enabled ? '🎤' : '🔇';
+          }
+        };
+      } else {
+        // Mute button for remote user (mute speaker)
+        muteBtn.innerHTML = '🔊';
+        muteBtn.title = `Mute/Unmute ${uuid}`;
+        muteBtn.onclick = () => {
+          video.muted = !video.muted;
+          muteBtn.classList.toggle('muted');
+          muteBtn.innerHTML = video.muted ? '🔇' : '🔊';
+        };
       }
       
-      const videoGrid = document.getElementById('videoGrid');
-      const containers = videoGrid.querySelectorAll('.videoContainer');
-      const containerCount = containers.length;
+      controls.appendChild(muteBtn);
+      container.appendChild(controls);
+
+      container.appendChild(video);
+      container.appendChild(label);
+      container.appendChild(status);
       
-      // Reset all special classes and make all containers visible
-      containers.forEach(container => {
-        container.classList.remove('focused', 'minimized', 'thumbnail');
-        container.style.position = '';
-        container.style.top = '';
-        container.style.left = '';
-        container.style.right = '';
-        container.style.bottom = '';
-        container.style.width = '';
-        container.style.height = '';
-        container.style.zIndex = '';
-        container.style.display = 'block';
+      document.getElementById('videoGrid').appendChild(container);
+    }
+
+    async function registerPeer(peerId) {
+      await database.ref(`peers/${peerId}`).set({
+        timestamp: Date.now(),
+        name: peerId
       });
       
-      // Remove thumbnail strip and move containers back to main grid
-      const existingStrip = document.querySelector('.thumbnail-strip');
-      if (existingStrip) {
-        // Move any containers from strip back to main grid
-        const strippedContainers = existingStrip.querySelectorAll('.videoContainer');
-        strippedContainers.forEach(container => {
-          videoGrid.appendChild(container);
-        });
-        existingStrip.remove();
-      }
-      
-      if (isMobile) {
-        setupMobileLayout(containers);
-      } else {
-        setupDesktopLayout(containerCount);
-      }
+      // Clean up on disconnect
+      database.ref(`peers/${peerId}`).onDisconnect().remove();
+      database.ref(`streams/${peerId}`).onDisconnect().remove();
     }
-    
-    function setupMobileLayout(containers) {
-      const videoGrid = document.getElementById('videoGrid');
-      const isPortrait = window.innerHeight > window.innerWidth;
-      
-      // Reset grid styles for mobile
-      videoGrid.style.display = 'block';
-      videoGrid.style.gridTemplateColumns = '';
-      videoGrid.style.gridTemplateRows = '';
-      videoGrid.style.gridGap = '';
-      
-      if (containers.length === 1) {
-        // Just local user
-        videoGrid.style.display = 'flex';
-        videoGrid.style.alignItems = 'center';
-        videoGrid.style.justifyContent = 'center';
-        return;
-      }
-      
-      // Find local user and make them small
-      const localContainer = document.getElementById(`video-${myUuid}`);
-      if (localContainer) {
-        localContainer.classList.add('minimized');
-      }
-      
-      // Other users take main area
-      const remoteContainers = Array.from(containers).filter(c => c.id !== `video-${myUuid}`);
-      
-      if (remoteContainers.length === 1) {
-        // One remote user - they get the main area
-        const mainContainer = remoteContainers[0];
-        mainContainer.style.position = 'fixed';
-        mainContainer.style.top = '10px';
-        mainContainer.style.left = '10px';
-        mainContainer.style.right = '10px';
-        mainContainer.style.bottom = '10px';
-        mainContainer.style.width = '';
-        mainContainer.style.height = '';
-      } else {
-        // Multiple remote users - split the screen
-        remoteContainers.forEach((container, index) => {
-          container.style.position = 'fixed';
-          container.style.zIndex = '150';
-          
-          if (isPortrait) {
-            // Split vertically
-            const height = `calc(${100 / remoteContainers.length}% - 20px)`;
-            container.style.top = `calc(${index * 100 / remoteContainers.length}% + 10px)`;
-            container.style.left = '10px';
-            container.style.right = '10px';
-            container.style.height = height;
-            container.style.width = '';
-          } else {
-            // Split horizontally (landscape)
-            const width = `calc(${100 / remoteContainers.length}% - 20px)`;
-            container.style.left = `calc(${index * 100 / remoteContainers.length}% + 10px)`;
-            container.style.top = '10px';
-            container.style.bottom = '10px';
-            container.style.width = width;
-            container.style.height = '';
-          }
-        });
-      }
+
+    async function getActivePeers() {
+      const snapshot = await database.ref('peers').once('value');
+      const peers = snapshot.val() || {};
+      const activePeers = Object.keys(peers).filter(id => id !== myUuid);
+      return activePeers;
     }
-    
-    function setupDesktopLayout(containerCount) {
-      const videoGrid = document.getElementById('videoGrid');
-      videoGrid.style.display = 'grid';
-      videoGrid.style.alignItems = '';
-      videoGrid.style.justifyContent = '';
-      videoGrid.style.gridGap = '15px';
-      
-      if (containerCount === 1) {
-        videoGrid.style.gridTemplateColumns = '1fr';
-      } else if (containerCount === 2) {
-        videoGrid.style.gridTemplateColumns = 'repeat(2, 1fr)';
-      } else if (containerCount <= 4) {
-        videoGrid.style.gridTemplateColumns = 'repeat(2, 1fr)';
-        videoGrid.style.gridTemplateRows = 'repeat(2, 1fr)';
-      } else {
-        videoGrid.style.gridTemplateColumns = 'repeat(3, 1fr)';
-      }
-    }
-    
-    function setupFocusLayout() {
-      const videoGrid = document.getElementById('videoGrid');
-      
-      // First, ensure all containers are back in the main videoGrid
-      const allContainers = document.querySelectorAll('.videoContainer');
-      allContainers.forEach(container => {
-        if (container.parentNode !== videoGrid) {
-          videoGrid.appendChild(container);
+
+    function listenForPeers() {
+      database.ref('peers').on('child_added', (snapshot) => {
+        const peerId = snapshot.key;
+        if (peerId !== myUuid) {
+          console.log('New peer joined:', peerId);
         }
       });
-      
-      // Remove any existing thumbnail strip
-      const existingStrip = document.querySelector('.thumbnail-strip');
-      if (existingStrip) existingStrip.remove();
-      
-      const containers = videoGrid.querySelectorAll('.videoContainer');
-      const focusedContainer = document.getElementById(`video-${focusedUser}`);
-      const isPortrait = window.innerHeight > window.innerWidth;
-      
-      console.log('Focus layout - Total containers:', containers.length);
-      console.log('Focus layout - Focused user:', focusedUser);
-      console.log('Focus layout - Container IDs:', Array.from(containers).map(c => c.id));
-      
-      containers.forEach(container => {
-        container.classList.remove('focused', 'minimized', 'thumbnail');
-        container.style.position = '';
-        container.style.top = '';
-        container.style.left = '';
-        container.style.right = '';
-        container.style.bottom = '';
-        container.style.width = '';
-        container.style.height = '';
-        container.style.zIndex = '';
-        container.style.display = 'block';
+
+      database.ref('peers').on('child_removed', (snapshot) => {
+        const peerId = snapshot.key;
+        console.log('Peer left:', peerId);
+        const container = document.getElementById(`video-${peerId}`);
+        if (container) container.remove();
       });
-      
-      if (focusedContainer) {
-        focusedContainer.classList.add('focused');
-        
-        // Create thumbnail strip for ALL other users (including yourself)
-        const otherContainers = Array.from(containers).filter(c => c !== focusedContainer);
-        console.log('Other containers for thumbnails:', otherContainers.map(c => c.id));
-        
-        if (otherContainers.length > 0) {
-          const thumbnailStrip = document.createElement('div');
-          thumbnailStrip.className = 'thumbnail-strip';
-          
-          otherContainers.forEach((container, index) => {
-            container.classList.add('thumbnail');
-            
-            if (isMobile) {
-              if (isPortrait) {
-                // Bottom strip
-                container.style.position = 'static';
-              } else {
-                // Right side strip
-                container.style.position = 'static';
-              }
-              thumbnailStrip.appendChild(container);
-            } else {
-              // Desktop: position thumbnails around edges
-              container.style.position = 'fixed';
-              container.style.top = `${20 + index * 100}px`;
-              container.style.right = '20px';
-              container.style.width = '150px';
-              container.style.height = '100px';
-            }
-          });
-          
-          if (isMobile) {
-            document.getElementById('videoGrid').appendChild(thumbnailStrip);
-          }
-        }
-      }
-    }
-    
-    function toggleFocus(uuid) {
-      if (focusedUser === uuid) {
-        // Unfocus
-        focusedUser = null;
-      } else {
-        // Focus on this user
-        focusedUser = uuid;
-      }
-      adjustGridLayout();
     }
 
-    // Handle orientation change
-    window.addEventListener('orientationchange', () => {
-      setTimeout(() => {
-        isMobile = window.innerWidth <= 768;
-        adjustGridLayout();
-      }, 500);
-    });
-    
-    // Handle window resize
-    window.addEventListener('resize', () => {
-      isMobile = window.innerWidth <= 768;
-      adjustGridLayout();
-    });
-    
     // Cleanup on exit
     window.addEventListener('beforeunload', () => {
-      if (peer) {
-        peer.destroy();
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
       }
       if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
