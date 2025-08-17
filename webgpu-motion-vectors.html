@@ -235,6 +235,8 @@
     let motionVectors = [];
     let eventCount = 0;
     let lastEventTime = performance.now();
+    let keyFrame = null; // Store the initial keyframe
+    let framesSinceKeyframe = 0;
 
     // Canvas contexts
     const currentCanvas = document.getElementById('currentCanvas');
@@ -908,27 +910,68 @@
     }
 
     function applyMotionCompensation(events) {
-      // Copy previous frame to output
-      if (previousFrame) {
-        outputCtx.putImageData(previousFrame, 0, 0);
+      // Every 60 frames (~2 seconds), we need a new keyframe
+      framesSinceKeyframe++;
+      
+      if (!keyFrame || framesSinceKeyframe > 60) {
+        // New keyframe needed - this would be transmitted as full image
+        keyFrame = currentCtx.getImageData(0, 0, 320, 240);
+        framesSinceKeyframe = 0;
+        
+        // Show that we're sending a keyframe
+        outputCtx.putImageData(keyFrame, 0, 0);
+        
+        // Visual indicator of keyframe
+        outputCtx.fillStyle = 'rgba(255, 255, 0, 0.5)';
+        outputCtx.font = 'bold 16px monospace';
+        outputCtx.fillText('KEYFRAME', 10, 30);
+        
+        // Update stats to show keyframe size
+        const keyframeSize = 320 * 240 * 3 / 4; // Rough JPEG estimate
+        document.getElementById('dataSize').textContent = (keyframeSize / 1024).toFixed(2) + ' KB (keyframe)';
+        return;
       }
 
-      // Apply motion updates
+      // Start with BLACK (or last reconstructed frame if you're accumulating)
+      // This simulates what the receiver would see with ONLY the events
+      outputCtx.fillStyle = 'black';
+      outputCtx.fillRect(0, 0, 320, 240);
+      
+      // If we have a keyframe, show it dimmed as the base
+      if (keyFrame) {
+        outputCtx.putImageData(keyFrame, 0, 0);
+        // Darken it to show it's old
+        outputCtx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+        outputCtx.fillRect(0, 0, 320, 240);
+      }
+
+      // Apply ONLY the motion events (this is all that would be transmitted)
       events.forEach(event => {
-        // Copy block from current frame with motion offset
+        // Copy block from current frame - this is what gets sent
         const imageData = currentCtx.getImageData(
           event.x, event.y, event.size, event.size
         );
+        
+        // Place it at the motion-compensated position
         outputCtx.putImageData(imageData, 
           event.x + Math.round(event.mvX), 
           event.y + Math.round(event.mvY)
         );
 
-        // Highlight updated blocks
-        outputCtx.strokeStyle = 'rgba(0, 255, 0, 0.3)';
+        // Highlight updated blocks to show what's being transmitted
+        outputCtx.strokeStyle = 'rgba(0, 255, 0, 0.5)';
         outputCtx.lineWidth = 1;
-        outputCtx.strokeRect(event.x, event.y, event.size, event.size);
+        outputCtx.strokeRect(
+          event.x + Math.round(event.mvX), 
+          event.y + Math.round(event.mvY), 
+          event.size, event.size
+        );
       });
+      
+      // Show event count overlay
+      outputCtx.fillStyle = 'rgba(0, 255, 0, 0.8)';
+      outputCtx.font = '12px monospace';
+      outputCtx.fillText(`Events: ${events.length}`, 10, 20);
     }
   </script>
 </body>
