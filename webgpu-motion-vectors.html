@@ -176,6 +176,13 @@
         <option value="500">Bandwidth: 500 KB/s</option>
         <option value="1000">Bandwidth: 1 MB/s</option>
       </select>
+      <select id="resolutionSelect">
+        <option value="320x240" selected>Resolution: 320x240</option>
+        <option value="480x360">Resolution: 480x360</option>
+        <option value="640x480">Resolution: 640x480</option>
+        <option value="800x600">Resolution: 800x600</option>
+        <option value="960x720">Resolution: 960x720</option>
+      </select>
     </div>
 
     <div class="demo-grid">
@@ -186,7 +193,7 @@
         <div class="stats">
           <div class="stat-row">
             <span class="stat-label">Resolution:</span>
-            <span class="stat-value">320x240</span>
+            <span class="stat-value" id="resolution">320x240</span>
           </div>
           <div class="stat-row">
             <span class="stat-label">FPS:</span>
@@ -250,6 +257,8 @@
     let showBlocks = false; // Default to not showing green squares
     let keyframeInterval = 0; // Default to never (pure motion compensation)
     let adaptiveMode = true; // Default to adaptive quadtree merging
+    let videoWidth = 320; // Current resolution width
+    let videoHeight = 240; // Current resolution height
     let frameCount = 0;
     let lastTime = performance.now();
     let previousFrame = null;
@@ -284,8 +293,8 @@
 
     // Initialize correction canvas for feedback loop
     correctionCanvas = document.createElement('canvas');
-    correctionCanvas.width = 320;
-    correctionCanvas.height = 240;
+    correctionCanvas.width = videoWidth;
+    correctionCanvas.height = videoHeight;
     correctionCtx = correctionCanvas.getContext('2d', {
       alpha: false,
       desynchronized: true
@@ -337,6 +346,38 @@
       // Calculate event budget based on bandwidth
       // Assuming ~100 bytes per event on average
       eventBudget = Math.floor((maxBandwidthKBps * 1024) / (30 * 100)); // Per frame at 30fps
+    };
+    
+    document.getElementById('resolutionSelect').onchange = async (e) => {
+      const [width, height] = e.target.value.split('x').map(Number);
+      videoWidth = width;
+      videoHeight = height;
+      
+      // Update canvas sizes
+      const canvases = ['currentCanvas', 'motionCanvas', 'outputCanvas'];
+      canvases.forEach(id => {
+        const canvas = document.getElementById(id);
+        canvas.width = width;
+        canvas.height = height;
+      });
+      
+      // Update correction canvas size
+      if (correctionCanvas) {
+        correctionCanvas.width = width;
+        correctionCanvas.height = height;
+      }
+      
+      // Update resolution display
+      document.getElementById('resolution').textContent = `${width}x${height}`;
+      
+      // Reinitialize WebGPU with new resolution
+      if (device) {
+        await initWebGPU();
+      }
+      
+      // Reset accumulated frame since resolution changed
+      accumulatedFrame = null;
+      senderReferenceFrame = null;
     };
 
     async function initWebGPU() {
@@ -710,7 +751,7 @@
       try {
         video = document.getElementById('video');
         const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { width: 320, height: 240 } 
+          video: { width: videoWidth, height: videoHeight } 
         });
         video.srcObject = stream;
         await video.play();
@@ -742,8 +783,8 @@
       if (!isRunning) return;
 
       // Draw current frame
-      currentCtx.drawImage(video, 0, 0, 320, 240);
-      const currentImageData = currentCtx.getImageData(0, 0, 320, 240);
+      currentCtx.drawImage(video, 0, 0, videoWidth, videoHeight);
+      const currentImageData = currentCtx.getImageData(0, 0, videoWidth, videoHeight);
       
       // Calculate FPS
       frameCount++;
@@ -768,7 +809,7 @@
     async function computeMotionVectors(currentFrame, previousFrame) {
       try {
         // Create textures from image data
-        const textureSize = { width: 320, height: 240 };
+        const textureSize = { width: videoWidth, height: videoHeight };
         
         // Current frame texture
         const currentTexture = device.createTexture({
@@ -806,13 +847,13 @@
         paramsView.setUint32(0, blockSize, true);
         paramsView.setUint32(4, searchRadius, true);
         paramsView.setFloat32(8, threshold, true);
-        paramsView.setUint32(12, 320, true);
-        paramsView.setUint32(16, 240, true);
+        paramsView.setUint32(12, videoWidth, true);
+        paramsView.setUint32(16, videoHeight, true);
         device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 
         // Create motion vector output buffer
-        const blocksX = Math.ceil(320 / blockSize);
-        const blocksY = Math.ceil(240 / blockSize);
+        const blocksX = Math.ceil(videoWidth / blockSize);
+        const blocksY = Math.ceil(videoHeight / blockSize);
         const motionBufferSize = blocksX * blocksY * 16; // vec4<f32> per block
         const motionBuffer = device.createBuffer({
           size: motionBufferSize,
@@ -890,9 +931,9 @@
     // Helper to compute block variance for edge detection
     function computeBlockVariance(imageData, x, y, size) {
       let sum = 0, sumSq = 0, count = 0;
-      const width = 320;
+      const width = videoWidth;
       
-      for (let dy = 0; dy < size && y + dy < 240; dy++) {
+      for (let dy = 0; dy < size && y + dy < videoHeight; dy++) {
         for (let dx = 0; dx < size && x + dx < width; dx++) {
           const idx = ((y + dy) * width + (x + dx)) * 4;
           const gray = (imageData.data[idx] + imageData.data[idx + 1] + imageData.data[idx + 2]) / 3;
@@ -975,8 +1016,8 @@
     // Compute correction events by comparing reference with actual
     function computeCorrectionEvents(currentImageData, referenceImageData, blockSize) {
       const corrections = [];
-      const width = 320;
-      const height = 240;
+      const width = videoWidth;
+      const height = videoHeight;
       
       // Check each block for differences
       for (let y = 0; y < height; y += blockSize) {
@@ -1212,7 +1253,7 @@
     function visualizeMotionVectors(motionData, blocksX, blocksY) {
       // Clear motion canvas
       motionCtx.fillStyle = 'rgba(0, 0, 0, 0.3)';
-      motionCtx.fillRect(0, 0, 320, 240);
+      motionCtx.fillRect(0, 0, videoWidth, videoHeight);
 
       // Draw current frame as background
       motionCtx.globalAlpha = 0.3;
@@ -1224,7 +1265,7 @@
       
       // FEEDBACK LOOP: Compare sender reference with actual current frame
       if (senderReferenceFrame) {
-        const currentImageData = currentCtx.getImageData(0, 0, 320, 240);
+        const currentImageData = currentCtx.getImageData(0, 0, videoWidth, videoHeight);
         const corrections = computeCorrectionEvents(currentImageData, senderReferenceFrame, blockSize);
         
         // Merge corrections with motion events, avoiding duplicates
@@ -1355,7 +1396,7 @@
       document.getElementById('dataSize').textContent = dataSizeKB.toFixed(2) + ' KB/frame';
       
       // Raw frame size
-      const rawSize = 320 * 240 * 3; // Uncompressed RGB
+      const rawSize = videoWidth * videoHeight * 3; // Uncompressed RGB
       const compressionRatio = dataSize > 0 ? Math.round(rawSize / dataSize) : 999;
       document.getElementById('compression').textContent = compressionRatio + 'x';
       
@@ -1368,7 +1409,7 @@
       applyMotionCompensation(events);
       
       // Update sender reference frame (what we think receiver has)
-      senderReferenceFrame = outputCtx.getImageData(0, 0, 320, 240);
+      senderReferenceFrame = outputCtx.getImageData(0, 0, videoWidth, videoHeight);
     }
 
     function applyMotionCompensation(events) {
@@ -1381,8 +1422,8 @@
       // Initial frame setup (only happens once)
       if (!accumulatedFrame) {
         // First frame needs to be complete
-        accumulatedFrame = currentCtx.getImageData(0, 0, 320, 240);
-        senderReferenceFrame = currentCtx.getImageData(0, 0, 320, 240); // Initialize sender reference
+        accumulatedFrame = currentCtx.getImageData(0, 0, videoWidth, videoHeight);
+        senderReferenceFrame = currentCtx.getImageData(0, 0, videoWidth, videoHeight); // Initialize sender reference
         outputCtx.putImageData(accumulatedFrame, 0, 0);
         
         outputCtx.fillStyle = 'rgba(255, 255, 0, 0.5)';
@@ -1393,7 +1434,7 @@
       
       // Optional keyframe reset (but we want to avoid this)
       if (keyframeInterval > 0 && framesSinceKeyframe >= keyframeInterval) {
-        accumulatedFrame = currentCtx.getImageData(0, 0, 320, 240);
+        accumulatedFrame = currentCtx.getImageData(0, 0, videoWidth, videoHeight);
         framesSinceKeyframe = 0;
         outputCtx.putImageData(accumulatedFrame, 0, 0);
         
@@ -1418,7 +1459,7 @@
       });
       
       // Save the current output as the new accumulated frame
-      accumulatedFrame = outputCtx.getImageData(0, 0, 320, 240);
+      accumulatedFrame = outputCtx.getImageData(0, 0, videoWidth, videoHeight);
       
       // Show block outlines if enabled
       if (showBlocks) {
@@ -1451,7 +1492,7 @@
         outputCtx.fillText('Pure motion compensation (no keyframes)', 10, 35);
         
         // Track coverage to detect areas that need updating
-        const coverage = (events.length * 16) / (320 * 240) * 100;
+        const coverage = (events.length * 16) / (videoWidth * videoHeight) * 100;
         outputCtx.fillText(`Coverage: ${coverage.toFixed(1)}%`, 10, 50);
       } else {
         const secondsSinceKeyframe = (framesSinceKeyframe / 30).toFixed(1);
