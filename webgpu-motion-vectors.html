@@ -143,10 +143,11 @@
     <div class="controls">
       <button id="startBtn">Start Camera</button>
       <select id="blockSize">
-        <option value="4">4x4 blocks</option>
-        <option value="8" selected>8x8 blocks</option>
-        <option value="16">16x16 blocks</option>
+        <option value="4" selected>4x4 blocks (adaptive)</option>
+        <option value="8">8x8 blocks (fixed)</option>
+        <option value="16">16x16 blocks (fixed)</option>
       </select>
+      <button id="adaptiveBtn" class="active">Adaptive: ON</button>
       <select id="searchRadius">
         <option value="4">Search ±4 pixels</option>
         <option value="8" selected>Search ±8 pixels</option>
@@ -233,12 +234,13 @@
     // Global state
     let video, isRunning = false;
     let device, context;
-    let blockSize = 8;
+    let blockSize = 4; // Start with small blocks for adaptive mode
     let searchRadius = 8;
     let threshold = 10;
     let showVectors = true;
     let showBlocks = false; // Default to not showing green squares
     let keyframeInterval = 60; // Default to every 2 seconds
+    let adaptiveMode = true; // Default to adaptive quadtree merging
     let frameCount = 0;
     let lastTime = performance.now();
     let previousFrame = null;
@@ -291,6 +293,18 @@
     document.getElementById('keyframeInterval').onchange = (e) => {
       keyframeInterval = parseInt(e.target.value);
       framesSinceKeyframe = 0; // Reset counter when interval changes
+    };
+    
+    document.getElementById('adaptiveBtn').onclick = () => {
+      adaptiveMode = !adaptiveMode;
+      document.getElementById('adaptiveBtn').textContent = `Adaptive: ${adaptiveMode ? 'ON' : 'OFF'}`;
+      document.getElementById('adaptiveBtn').classList.toggle('active', adaptiveMode);
+      // Force to 4x4 blocks when adaptive mode is on
+      if (adaptiveMode && blockSize > 4) {
+        blockSize = 4;
+        document.getElementById('blockSize').value = '4';
+        initWebGPU(); // Reinitialize with new block size
+      }
     };
 
     async function initWebGPU() {
@@ -829,6 +843,173 @@
       }
     }
 
+    // Adaptive quadtree merging of motion vectors
+    function mergeAdaptiveBlocks(motionData, blocksX, blocksY) {
+      if (!adaptiveMode) {
+        // No merging in fixed mode - return raw blocks
+        const events = [];
+        for (let by = 0; by < blocksY; by++) {
+          for (let bx = 0; bx < blocksX; bx++) {
+            const idx = (by * blocksX + bx) * 4;
+            const mvX = motionData[idx];
+            const mvY = motionData[idx + 1];
+            const magnitude = motionData[idx + 2];
+            const confidence = motionData[idx + 3];
+            
+            if (confidence > 0.3 && magnitude > 0.1) {
+              events.push({
+                x: bx * blockSize,
+                y: by * blockSize,
+                mvX: mvX,
+                mvY: mvY,
+                size: blockSize,
+                confidence: confidence
+              });
+            }
+          }
+        }
+        return events;
+      }
+      
+      // Adaptive mode - merge similar neighboring blocks
+      const merged = [];
+      const visited = new Set();
+      
+      // Try to form larger blocks (16x16, 8x8) from 4x4 base blocks
+      for (let by = 0; by < blocksY; by += 4) {
+        for (let bx = 0; bx < blocksX; bx += 4) {
+          // Try 16x16 first
+          if (canMerge16x16(motionData, bx, by, blocksX, blocksY, visited)) {
+            const idx = (by * blocksX + bx) * 4;
+            merged.push({
+              x: bx * blockSize,
+              y: by * blockSize,
+              mvX: motionData[idx],
+              mvY: motionData[idx + 1],
+              size: 16,
+              confidence: motionData[idx + 3]
+            });
+            // Mark all sub-blocks as visited
+            for (let dy = 0; dy < 4; dy++) {
+              for (let dx = 0; dx < 4; dx++) {
+                visited.add(`${bx + dx},${by + dy}`);
+              }
+            }
+          }
+        }
+      }
+      
+      // Try 8x8 blocks for remaining areas
+      for (let by = 0; by < blocksY; by += 2) {
+        for (let bx = 0; bx < blocksX; bx += 2) {
+          if (!visited.has(`${bx},${by}`) && canMerge8x8(motionData, bx, by, blocksX, blocksY, visited)) {
+            const idx = (by * blocksX + bx) * 4;
+            merged.push({
+              x: bx * blockSize,
+              y: by * blockSize,
+              mvX: motionData[idx],
+              mvY: motionData[idx + 1],
+              size: 8,
+              confidence: motionData[idx + 3]
+            });
+            // Mark sub-blocks as visited
+            for (let dy = 0; dy < 2; dy++) {
+              for (let dx = 0; dx < 2; dx++) {
+                visited.add(`${bx + dx},${by + dy}`);
+              }
+            }
+          }
+        }
+      }
+      
+      // Add remaining 4x4 blocks that couldn't be merged
+      for (let by = 0; by < blocksY; by++) {
+        for (let bx = 0; bx < blocksX; bx++) {
+          if (!visited.has(`${bx},${by}`)) {
+            const idx = (by * blocksX + bx) * 4;
+            const confidence = motionData[idx + 3];
+            const magnitude = motionData[idx + 2];
+            
+            if (confidence > 0.3 && magnitude > 0.1) {
+              merged.push({
+                x: bx * blockSize,
+                y: by * blockSize,
+                mvX: motionData[idx],
+                mvY: motionData[idx + 1],
+                size: 4,
+                confidence: confidence
+              });
+            }
+          }
+        }
+      }
+      
+      return merged;
+    }
+    
+    function canMerge16x16(motionData, bx, by, blocksX, blocksY, visited) {
+      if (bx + 3 >= blocksX || by + 3 >= blocksY) return false;
+      
+      // Check if all 4x4 sub-blocks have similar motion
+      const baseIdx = (by * blocksX + bx) * 4;
+      const baseMvX = motionData[baseIdx];
+      const baseMvY = motionData[baseIdx + 1];
+      const baseConfidence = motionData[baseIdx + 3];
+      
+      // Need minimum confidence to merge
+      if (baseConfidence < 0.2) return false;
+      
+      // Check all 16 sub-blocks
+      for (let dy = 0; dy < 4; dy++) {
+        for (let dx = 0; dx < 4; dx++) {
+          if (visited.has(`${bx + dx},${by + dy}`)) return false;
+          
+          const idx = ((by + dy) * blocksX + (bx + dx)) * 4;
+          const mvX = motionData[idx];
+          const mvY = motionData[idx + 1];
+          const confidence = motionData[idx + 3];
+          
+          // Check if motion vectors are similar (within 1 pixel)
+          if (Math.abs(mvX - baseMvX) > 1.0 || 
+              Math.abs(mvY - baseMvY) > 1.0 ||
+              confidence < 0.2) {
+            return false;
+          }
+        }
+      }
+      return true;
+    }
+    
+    function canMerge8x8(motionData, bx, by, blocksX, blocksY, visited) {
+      if (bx + 1 >= blocksX || by + 1 >= blocksY) return false;
+      
+      const baseIdx = (by * blocksX + bx) * 4;
+      const baseMvX = motionData[baseIdx];
+      const baseMvY = motionData[baseIdx + 1];
+      const baseConfidence = motionData[baseIdx + 3];
+      
+      if (baseConfidence < 0.25) return false;
+      
+      // Check all 4 sub-blocks
+      for (let dy = 0; dy < 2; dy++) {
+        for (let dx = 0; dx < 2; dx++) {
+          if (visited.has(`${bx + dx},${by + dy}`)) return false;
+          
+          const idx = ((by + dy) * blocksX + (bx + dx)) * 4;
+          const mvX = motionData[idx];
+          const mvY = motionData[idx + 1];
+          const confidence = motionData[idx + 3];
+          
+          if (Math.abs(mvX - baseMvX) > 0.5 || 
+              Math.abs(mvY - baseMvY) > 0.5 ||
+              confidence < 0.25) {
+            return false;
+          }
+        }
+      }
+      return true;
+    }
+
     function visualizeMotionVectors(motionData, blocksX, blocksY) {
       // Clear motion canvas
       motionCtx.fillStyle = 'rgba(0, 0, 0, 0.3)';
@@ -839,73 +1020,65 @@
       motionCtx.drawImage(currentCanvas, 0, 0);
       motionCtx.globalAlpha = 1.0;
 
-      let motionCount = 0;
+      // Get merged adaptive blocks
+      const events = mergeAdaptiveBlocks(motionData, blocksX, blocksY);
+      
+      let motionCount = events.length;
       let totalMotion = 0;
       let maxMotion = 0;
-      const events = [];
+      let blockStats = { 4: 0, 8: 0, 16: 0 };
 
-      // Draw motion vectors
-      for (let by = 0; by < blocksY; by++) {
-        for (let bx = 0; bx < blocksX; bx++) {
-          const idx = (by * blocksX + bx) * 4;
-          const mvX = motionData[idx];
-          const mvY = motionData[idx + 1];
-          const magnitude = motionData[idx + 2];
-          const confidence = motionData[idx + 3];
+      // Draw motion vectors for merged blocks
+      events.forEach(event => {
+        const magnitude = Math.sqrt(event.mvX * event.mvX + event.mvY * event.mvY);
+        totalMotion += magnitude;
+        maxMotion = Math.max(maxMotion, magnitude);
+        
+        // Count block sizes
+        blockStats[event.size] = (blockStats[event.size] || 0) + 1;
 
-          if (confidence > 0.3 && magnitude > 0.1) { // Show motion based on confidence
-            motionCount++;
-            totalMotion += magnitude;
-            maxMotion = Math.max(maxMotion, magnitude);
+        const centerX = event.x + event.size / 2;
+        const centerY = event.y + event.size / 2;
 
-            const centerX = bx * blockSize + blockSize / 2;
-            const centerY = by * blockSize + blockSize / 2;
+        if (showVectors && magnitude > 0.1) {
+          // Draw motion vector arrow
+          motionCtx.strokeStyle = `hsl(${120 - magnitude * 10}, 100%, 50%)`;
+          motionCtx.lineWidth = Math.max(1, magnitude / 4);
+          motionCtx.beginPath();
+          motionCtx.moveTo(centerX, centerY);
+          motionCtx.lineTo(centerX + event.mvX * 2, centerY + event.mvY * 2);
+          motionCtx.stroke();
 
-            if (showVectors) {
-              // Draw motion vector arrow
-              motionCtx.strokeStyle = `hsl(${120 - magnitude * 10}, 100%, 50%)`;
-              motionCtx.lineWidth = Math.max(1, magnitude / 4);
-              motionCtx.beginPath();
-              motionCtx.moveTo(centerX, centerY);
-              motionCtx.lineTo(centerX + mvX * 2, centerY + mvY * 2);
-              motionCtx.stroke();
-
-              // Draw arrowhead
-              const angle = Math.atan2(mvY, mvX);
-              motionCtx.fillStyle = motionCtx.strokeStyle;
-              motionCtx.beginPath();
-              motionCtx.moveTo(centerX + mvX * 2, centerY + mvY * 2);
-              motionCtx.lineTo(
-                centerX + mvX * 2 - 5 * Math.cos(angle - Math.PI / 6),
-                centerY + mvY * 2 - 5 * Math.sin(angle - Math.PI / 6)
-              );
-              motionCtx.lineTo(
-                centerX + mvX * 2 - 5 * Math.cos(angle + Math.PI / 6),
-                centerY + mvY * 2 - 5 * Math.sin(angle + Math.PI / 6)
-              );
-              motionCtx.closePath();
-              motionCtx.fill();
-            }
-
-            // Draw block outline
-            motionCtx.strokeStyle = 'rgba(255, 255, 0, 0.5)';
-            motionCtx.lineWidth = 1;
-            motionCtx.strokeRect(bx * blockSize, by * blockSize, blockSize, blockSize);
-
-            // Create event for this motion
-            events.push({
-              x: bx * blockSize,
-              y: by * blockSize,
-              mvX: mvX,
-              mvY: mvY,
-              size: blockSize
-            });
-          }
+          // Draw arrowhead
+          const angle = Math.atan2(event.mvY, event.mvX);
+          motionCtx.fillStyle = motionCtx.strokeStyle;
+          motionCtx.beginPath();
+          motionCtx.moveTo(centerX + event.mvX * 2, centerY + event.mvY * 2);
+          motionCtx.lineTo(
+            centerX + event.mvX * 2 - 5 * Math.cos(angle - Math.PI / 6),
+            centerY + event.mvY * 2 - 5 * Math.sin(angle - Math.PI / 6)
+          );
+          motionCtx.lineTo(
+            centerX + event.mvX * 2 - 5 * Math.cos(angle + Math.PI / 6),
+            centerY + event.mvY * 2 - 5 * Math.sin(angle + Math.PI / 6)
+          );
+          motionCtx.closePath();
+          motionCtx.fill();
         }
-      }
+
+        // Draw block outline with color based on size
+        const blockColors = {
+          4: 'rgba(255, 100, 100, 0.5)',  // Red for small
+          8: 'rgba(255, 255, 100, 0.5)',  // Yellow for medium
+          16: 'rgba(100, 255, 100, 0.5)'  // Green for large
+        };
+        motionCtx.strokeStyle = blockColors[event.size] || 'rgba(255, 255, 255, 0.5)';
+        motionCtx.lineWidth = 1;
+        motionCtx.strokeRect(event.x, event.y, event.size, event.size);
+      });
 
       // Update stats
-      document.getElementById('motionBlocks').textContent = motionCount;
+      document.getElementById('motionBlocks').textContent = `${motionCount} (${blockStats[16]}×16, ${blockStats[8]}×8, ${blockStats[4]}×4)`;
       document.getElementById('avgMotion').textContent = motionCount > 0 ? 
         (totalMotion / motionCount).toFixed(1) + ' px' : '0.0 px';
       document.getElementById('maxMotion').textContent = maxMotion.toFixed(1) + ' px';
@@ -919,8 +1092,13 @@
         lastEventTime = now;
       }
 
-      // Calculate data size (motion vectors only for blocks that moved)
-      const dataSize = events.length * 4; // 4 bytes per motion vector (2 components * 2 bytes)
+      // Calculate data size with adaptive blocks
+      // Each event needs: position (2 bytes), motion (2 bytes), size (1 byte)
+      let dataSize = 0;
+      events.forEach(event => {
+        dataSize += 2 + 2 + 1; // position + motion + size
+        dataSize += (event.size * event.size * 3) / 8; // Actual pixel data (rough estimate)
+      });
       document.getElementById('dataSize').textContent = (dataSize / 1024).toFixed(2) + ' KB';
       
       const rawSize = 320 * 240 * 3;
