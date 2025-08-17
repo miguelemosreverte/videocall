@@ -169,6 +169,13 @@
         <option value="150">Every 5 seconds</option>
         <option value="300">Every 10 seconds</option>
       </select>
+      <select id="bandwidthLimit">
+        <option value="50">Bandwidth: 50 KB/s</option>
+        <option value="100" selected>Bandwidth: 100 KB/s</option>
+        <option value="200">Bandwidth: 200 KB/s</option>
+        <option value="500">Bandwidth: 500 KB/s</option>
+        <option value="1000">Bandwidth: 1 MB/s</option>
+      </select>
     </div>
 
     <div class="demo-grid">
@@ -255,6 +262,12 @@
     let senderReferenceFrame = null; // What the sender thinks receiver has
     let correctionCanvas = null; // Canvas for computing corrections
     let correctionCtx = null;
+    
+    // Priority system variables
+    let motionHistory = new Map(); // Track motion history per block
+    let faceRegionMap = new Map(); // Track likely face regions
+    let maxBandwidthKBps = 100; // Default 100 KB/s (0.1 MB/s) bandwidth limit
+    let eventBudget = Math.floor((100 * 1024) / (30 * 100)); // ~34 events at 100KB/s
 
     // Canvas contexts
     const currentCanvas = document.getElementById('currentCanvas');
@@ -319,6 +332,13 @@
         document.getElementById('blockSize').value = '4';
         initWebGPU(); // Reinitialize with new block size
       }
+    };
+    
+    document.getElementById('bandwidthLimit').onchange = (e) => {
+      maxBandwidthKBps = parseInt(e.target.value);
+      // Calculate event budget based on bandwidth
+      // Assuming ~100 bytes per event on average
+      eventBudget = Math.floor((maxBandwidthKBps * 1024) / (30 * 100)); // Per frame at 30fps
     };
 
     async function initWebGPU() {
@@ -890,6 +910,145 @@
       return variance / 65536; // Normalize
     }
     
+    // Update motion history and detect face regions based on patterns
+    function updateMotionHistory(events) {
+      const now = Date.now();
+      
+      // Update motion history for each block
+      events.forEach(event => {
+        const key = `${event.x},${event.y}`;
+        
+        if (!motionHistory.has(key)) {
+          motionHistory.set(key, {
+            totalMotion: 0,
+            subtleChanges: 0,
+            lastUpdate: now,
+            consistency: 0
+          });
+        }
+        
+        const history = motionHistory.get(key);
+        const magnitude = Math.sqrt(event.mvX * event.mvX + event.mvY * event.mvY);
+        
+        // Track subtle, consistent motion (face characteristic)
+        if (magnitude > 0.1 && magnitude < 2.0) {
+          history.subtleChanges++;
+        }
+        history.totalMotion += magnitude;
+        history.lastUpdate = now;
+        
+        // Calculate consistency score (faces have consistent subtle motion)
+        history.consistency = history.subtleChanges / Math.max(1, history.totalMotion);
+      });
+      
+      // Decay old entries
+      for (const [key, history] of motionHistory.entries()) {
+        if (now - history.lastUpdate > 5000) { // 5 seconds
+          motionHistory.delete(key);
+        }
+      }
+      
+      // Identify face regions based on motion patterns
+      faceRegionMap.clear();
+      for (const [key, history] of motionHistory.entries()) {
+        // Face regions have consistent subtle motion
+        if (history.consistency > 0.3 && history.subtleChanges > 10) {
+          const [x, y] = key.split(',').map(Number);
+          
+          // Mark surrounding area as face region too
+          for (let dx = -32; dx <= 32; dx += blockSize) {
+            for (let dy = -32; dy <= 32; dy += blockSize) {
+              const nearKey = `${x + dx},${y + dy}`;
+              faceRegionMap.set(nearKey, true);
+            }
+          }
+        }
+      }
+    }
+    
+    // Prioritize events based on importance and budget
+    function prioritizeEvents(events, budget) {
+      // Calculate priority score for each event
+      events.forEach(event => {
+        const key = `${event.x},${event.y}`;
+        
+        // Base priority on several factors
+        let priority = 0;
+        
+        // 1. Is it in a detected face region? (highest priority)
+        if (faceRegionMap.has(key)) {
+          priority += 100;
+        }
+        
+        // 2. Is it in the typical face area?
+        const centerX = event.x + event.size/2;
+        const centerY = event.y + event.size/2;
+        if (centerX > 100 && centerX < 220 && centerY > 60 && centerY < 180) {
+          priority += 50;
+        }
+        
+        // 3. Motion history consistency
+        if (motionHistory.has(key)) {
+          const history = motionHistory.get(key);
+          priority += history.consistency * 30;
+        }
+        
+        // 4. Is it a correction event? (important for quality)
+        if (event.isCorrection) {
+          priority += 40;
+        }
+        
+        // 5. Smaller blocks get priority (more detail)
+        priority += (20 - event.size);
+        
+        event.priority = priority;
+      });
+      
+      // Sort by priority
+      events.sort((a, b) => b.priority - a.priority);
+      
+      // Apply budget
+      const prioritizedEvents = [];
+      const faceEvents = [];
+      const otherEvents = [];
+      
+      // Separate face and non-face events
+      events.forEach(event => {
+        if (event.priority >= 100) {
+          faceEvents.push(event);
+        } else {
+          otherEvents.push(event);
+        }
+      });
+      
+      // Allocate 90% of budget to face events
+      const faceBudget = Math.floor(budget * 0.9);
+      const otherBudget = budget - faceBudget;
+      
+      // Add face events up to budget
+      faceEvents.slice(0, faceBudget).forEach(event => {
+        prioritizedEvents.push(event);
+      });
+      
+      // Add other events with remaining budget
+      // Use larger blocks for low-priority areas to save bandwidth
+      let otherCount = 0;
+      for (const event of otherEvents) {
+        if (otherCount >= otherBudget) break;
+        
+        // Merge small blocks in low-priority areas
+        if (event.size === 4 && event.priority < 50) {
+          // Skip some small blocks in unimportant areas
+          if (Math.random() > 0.5) continue;
+        }
+        
+        prioritizedEvents.push(event);
+        otherCount++;
+      }
+      
+      return prioritizedEvents;
+    }
+    
     // Compute correction events by comparing reference with actual
     function computeCorrectionEvents(currentImageData, referenceImageData, blockSize) {
       const corrections = [];
@@ -1140,6 +1299,9 @@
       // Get motion events from GPU
       let events = mergeAdaptiveBlocks(motionData, blocksX, blocksY);
       
+      // Update motion history for face detection
+      updateMotionHistory(events);
+      
       // FEEDBACK LOOP: Compare sender reference with actual current frame
       if (senderReferenceFrame) {
         const currentImageData = currentCtx.getImageData(0, 0, 320, 240);
@@ -1164,12 +1326,17 @@
             // Update existing event with correction flag
             const existing = eventMap.get(key);
             existing.needsCorrection = true;
+            existing.isCorrection = true;
           }
         });
         
         // Convert back to array
         events = Array.from(eventMap.values());
       }
+      
+      // Apply priority-based budget system
+      const budgetedEvents = prioritizeEvents(events, eventBudget);
+      events = budgetedEvents;
       
       let motionCount = events.length;
       let totalMotion = 0;
@@ -1227,9 +1394,8 @@
       });
 
       // Update stats
-      const blockInfo = correctionCount > 0 ? 
-        `${motionCount} (${correctionCount} corrections)` : 
-        `${motionCount} (${blockStats[16]}×16, ${blockStats[8]}×8, ${blockStats[4]}×4)`;
+      const faceBlocks = events.filter(e => e.priority >= 100).length;
+      const blockInfo = `${motionCount}/${eventBudget} (${faceBlocks} face, ${correctionCount} fix)`;
       document.getElementById('motionBlocks').textContent = blockInfo;
       document.getElementById('avgMotion').textContent = motionCount > 0 ? 
         (totalMotion / motionCount).toFixed(1) + ' px' : '0.0 px';
