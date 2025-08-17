@@ -252,6 +252,9 @@
     let keyFrame = null; // Store the initial keyframe
     let framesSinceKeyframe = 0;
     let accumulatedFrame = null; // Store the accumulated reconstruction
+    let senderReferenceFrame = null; // What the sender thinks receiver has
+    let correctionCanvas = null; // Canvas for computing corrections
+    let correctionCtx = null;
 
     // Canvas contexts
     const currentCanvas = document.getElementById('currentCanvas');
@@ -268,6 +271,15 @@
     let previousTexture = null;
     let motionBuffer = null;
 
+    // Initialize correction canvas for feedback loop
+    correctionCanvas = document.createElement('canvas');
+    correctionCanvas.width = 320;
+    correctionCanvas.height = 240;
+    correctionCtx = correctionCanvas.getContext('2d', {
+      alpha: false,
+      desynchronized: true
+    });
+    
     // Initialize
     document.getElementById('startBtn').onclick = startCamera;
     document.getElementById('blockSize').onchange = (e) => {
@@ -857,6 +869,62 @@
       }
     }
     
+    // Compute correction events by comparing reference with actual
+    function computeCorrectionEvents(currentImageData, referenceImageData, blockSize) {
+      const corrections = [];
+      const width = 320;
+      const height = 240;
+      
+      // Check each block for differences
+      for (let y = 0; y < height; y += blockSize) {
+        for (let x = 0; x < width; x += blockSize) {
+          let blockDifference = 0;
+          let maxDifference = 0;
+          let pixelCount = 0;
+          
+          // Compute block difference
+          for (let dy = 0; dy < blockSize && y + dy < height; dy++) {
+            for (let dx = 0; dx < blockSize && x + dx < width; dx++) {
+              const idx = ((y + dy) * width + (x + dx)) * 4;
+              
+              const rDiff = Math.abs(currentImageData.data[idx] - referenceImageData.data[idx]);
+              const gDiff = Math.abs(currentImageData.data[idx + 1] - referenceImageData.data[idx + 1]);
+              const bDiff = Math.abs(currentImageData.data[idx + 2] - referenceImageData.data[idx + 2]);
+              
+              const pixelDiff = (rDiff + gDiff + bDiff) / 3;
+              blockDifference += pixelDiff;
+              maxDifference = Math.max(maxDifference, pixelDiff);
+              pixelCount++;
+            }
+          }
+          
+          // Average difference for the block
+          const avgDifference = blockDifference / pixelCount;
+          
+          // If block has significant difference, send correction
+          // Lower threshold for face regions (center of frame)
+          const centerX = x + blockSize/2;
+          const centerY = y + blockSize/2;
+          const isLikelyFace = centerX > 100 && centerX < 220 && centerY > 60 && centerY < 180;
+          const threshold = isLikelyFace ? 8 : 15; // More sensitive for face regions
+          
+          if (avgDifference > threshold || maxDifference > threshold * 2) {
+            corrections.push({
+              x: x,
+              y: y,
+              size: blockSize,
+              mvX: 0, // Correction events have no motion
+              mvY: 0,
+              confidence: avgDifference / 255, // Confidence based on difference
+              isCorrection: true
+            });
+          }
+        }
+      }
+      
+      return corrections;
+    }
+    
     // Adaptive quadtree merging of motion vectors
     function mergeAdaptiveBlocks(motionData, blocksX, blocksY) {
       if (!adaptiveMode) {
@@ -1037,13 +1105,45 @@
       motionCtx.drawImage(currentCanvas, 0, 0);
       motionCtx.globalAlpha = 1.0;
 
-      // Get merged adaptive blocks
-      const events = mergeAdaptiveBlocks(motionData, blocksX, blocksY);
+      // Get motion events from GPU
+      let events = mergeAdaptiveBlocks(motionData, blocksX, blocksY);
+      
+      // FEEDBACK LOOP: Compare sender reference with actual current frame
+      if (senderReferenceFrame) {
+        const currentImageData = currentCtx.getImageData(0, 0, 320, 240);
+        const corrections = computeCorrectionEvents(currentImageData, senderReferenceFrame, blockSize);
+        
+        // Merge corrections with motion events, avoiding duplicates
+        const eventMap = new Map();
+        
+        // Add motion events first
+        events.forEach(event => {
+          const key = `${event.x},${event.y}`;
+          eventMap.set(key, event);
+        });
+        
+        // Add or update with correction events
+        corrections.forEach(correction => {
+          const key = `${correction.x},${correction.y}`;
+          if (!eventMap.has(key)) {
+            // New correction block
+            eventMap.set(key, correction);
+          } else {
+            // Update existing event with correction flag
+            const existing = eventMap.get(key);
+            existing.needsCorrection = true;
+          }
+        });
+        
+        // Convert back to array
+        events = Array.from(eventMap.values());
+      }
       
       let motionCount = events.length;
       let totalMotion = 0;
       let maxMotion = 0;
       let blockStats = { 4: 0, 8: 0, 16: 0 };
+      let correctionCount = events.filter(e => e.isCorrection).length;
 
       // Draw motion vectors for merged blocks
       events.forEach(event => {
@@ -1095,7 +1195,10 @@
       });
 
       // Update stats
-      document.getElementById('motionBlocks').textContent = `${motionCount} (${blockStats[16]}×16, ${blockStats[8]}×8, ${blockStats[4]}×4)`;
+      const blockInfo = correctionCount > 0 ? 
+        `${motionCount} (${correctionCount} corrections)` : 
+        `${motionCount} (${blockStats[16]}×16, ${blockStats[8]}×8, ${blockStats[4]}×4)`;
+      document.getElementById('motionBlocks').textContent = blockInfo;
       document.getElementById('avgMotion').textContent = motionCount > 0 ? 
         (totalMotion / motionCount).toFixed(1) + ' px' : '0.0 px';
       document.getElementById('maxMotion').textContent = maxMotion.toFixed(1) + ' px';
@@ -1124,6 +1227,9 @@
 
       // Apply motion compensation to output
       applyMotionCompensation(events);
+      
+      // Update sender reference frame (what we think receiver has)
+      senderReferenceFrame = outputCtx.getImageData(0, 0, 320, 240);
     }
 
     function applyMotionCompensation(events) {
@@ -1137,6 +1243,7 @@
       if (!accumulatedFrame) {
         // First frame needs to be complete
         accumulatedFrame = currentCtx.getImageData(0, 0, 320, 240);
+        senderReferenceFrame = currentCtx.getImageData(0, 0, 320, 240); // Initialize sender reference
         outputCtx.putImageData(accumulatedFrame, 0, 0);
         
         outputCtx.fillStyle = 'rgba(255, 255, 0, 0.5)';
@@ -1182,8 +1289,15 @@
             8: 'rgba(255, 255, 100, 0.5)',
             16: 'rgba(100, 255, 100, 0.5)'
           };
-          outputCtx.strokeStyle = blockColors[event.size] || 'rgba(255, 255, 255, 0.5)';
-          outputCtx.lineWidth = 1;
+          
+          // Correction blocks shown in cyan
+          if (event.isCorrection) {
+            outputCtx.strokeStyle = 'rgba(0, 255, 255, 0.7)';
+            outputCtx.lineWidth = 2;
+          } else {
+            outputCtx.strokeStyle = blockColors[event.size] || 'rgba(255, 255, 255, 0.5)';
+            outputCtx.lineWidth = 1;
+          }
           outputCtx.strokeRect(event.x, event.y, event.size, event.size);
         });
       }
