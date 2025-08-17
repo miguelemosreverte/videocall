@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebGPU Motion Vectors - Video Compression</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      overflow-x: hidden;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 10px;
+      font-size: 2em;
+    }
+
+    .subtitle {
+      text-align: center;
+      opacity: 0.9;
+      margin-bottom: 30px;
+    }
+
+    .controls {
+      display: flex;
+      gap: 20px;
+      justify-content: center;
+      margin-bottom: 30px;
+      flex-wrap: wrap;
+    }
+
+    button, select {
+      padding: 10px 20px;
+      font-size: 16px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      background: white;
+      color: #667eea;
+      transition: all 0.3s;
+    }
+
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    }
+
+    button.active {
+      background: #fbbf24;
+      color: #1f2937;
+    }
+
+    .demo-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+
+    .demo-box {
+      background: rgba(255,255,255,0.1);
+      border-radius: 10px;
+      padding: 15px;
+      backdrop-filter: blur(10px);
+    }
+
+    .demo-box h3 {
+      margin-bottom: 10px;
+      font-size: 1.2em;
+    }
+
+    canvas {
+      width: 100%;
+      height: auto;
+      border-radius: 5px;
+      background: #000;
+    }
+
+    video {
+      display: none;
+    }
+
+    .stats {
+      background: rgba(0,0,0,0.5);
+      padding: 10px;
+      border-radius: 5px;
+      margin-top: 10px;
+      font-family: monospace;
+      font-size: 14px;
+    }
+
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      margin: 5px 0;
+    }
+
+    .stat-label {
+      opacity: 0.8;
+    }
+
+    .stat-value {
+      color: #fbbf24;
+      font-weight: bold;
+    }
+
+    .error-message {
+      background: rgba(255, 0, 0, 0.3);
+      padding: 10px;
+      border-radius: 5px;
+      margin: 20px;
+      text-align: center;
+      display: none;
+    }
+
+    .error-message.show {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🚀 WebGPU Motion Vectors</h1>
+    <p class="subtitle">Hardware-Accelerated Motion Detection for Video Compression</p>
+
+    <div id="errorMessage" class="error-message"></div>
+
+    <div class="controls">
+      <button id="startBtn">Start Camera</button>
+      <select id="blockSize">
+        <option value="4">4x4 blocks</option>
+        <option value="8" selected>8x8 blocks</option>
+        <option value="16">16x16 blocks</option>
+      </select>
+      <select id="searchRadius">
+        <option value="4">Search ±4 pixels</option>
+        <option value="8" selected>Search ±8 pixels</option>
+        <option value="16">Search ±16 pixels</option>
+      </select>
+      <select id="threshold">
+        <option value="5">Very Sensitive</option>
+        <option value="10" selected>Normal</option>
+        <option value="20">Less Sensitive</option>
+      </select>
+      <button id="showVectorsBtn">Show Vectors: ON</button>
+    </div>
+
+    <div class="demo-grid">
+      <!-- Original Video -->
+      <div class="demo-box">
+        <h3>📹 Current Frame</h3>
+        <canvas id="currentCanvas" width="320" height="240"></canvas>
+        <div class="stats">
+          <div class="stat-row">
+            <span class="stat-label">Resolution:</span>
+            <span class="stat-value">320x240</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">FPS:</span>
+            <span class="stat-value" id="fps">0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Motion Vectors -->
+      <div class="demo-box">
+        <h3>➡️ Motion Vectors</h3>
+        <canvas id="motionCanvas" width="320" height="240"></canvas>
+        <div class="stats">
+          <div class="stat-row">
+            <span class="stat-label">Blocks with Motion:</span>
+            <span class="stat-value" id="motionBlocks">0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Avg Motion:</span>
+            <span class="stat-value" id="avgMotion">0.0 px</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Max Motion:</span>
+            <span class="stat-value" id="maxMotion">0.0 px</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Reconstructed with Motion Compensation -->
+      <div class="demo-box">
+        <h3>🎯 Motion-Compensated Output</h3>
+        <canvas id="outputCanvas" width="320" height="240"></canvas>
+        <div class="stats">
+          <div class="stat-row">
+            <span class="stat-label">Events/sec:</span>
+            <span class="stat-value" id="eventsPerSec">0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Data Size:</span>
+            <span class="stat-value" id="dataSize">0 KB</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Compression:</span>
+            <span class="stat-value" id="compression">0x</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <video id="video" playsinline></video>
+
+  <script>
+    // Global state
+    let video, isRunning = false;
+    let device, context;
+    let blockSize = 8;
+    let searchRadius = 8;
+    let threshold = 10;
+    let showVectors = true;
+    let frameCount = 0;
+    let lastTime = performance.now();
+    let previousFrame = null;
+    let motionVectors = [];
+    let eventCount = 0;
+    let lastEventTime = performance.now();
+
+    // Canvas contexts
+    const currentCanvas = document.getElementById('currentCanvas');
+    const motionCanvas = document.getElementById('motionCanvas');
+    const outputCanvas = document.getElementById('outputCanvas');
+    const currentCtx = currentCanvas.getContext('2d');
+    const motionCtx = motionCanvas.getContext('2d');
+    const outputCtx = outputCanvas.getContext('2d');
+
+    // WebGPU variables
+    let pipeline = null;
+    let bindGroupLayout = null;
+    let currentTexture = null;
+    let previousTexture = null;
+    let motionBuffer = null;
+
+    // Initialize
+    document.getElementById('startBtn').onclick = startCamera;
+    document.getElementById('blockSize').onchange = (e) => {
+      blockSize = parseInt(e.target.value);
+      initWebGPU(); // Reinitialize with new block size
+    };
+    document.getElementById('searchRadius').onchange = (e) => {
+      searchRadius = parseInt(e.target.value);
+    };
+    document.getElementById('threshold').onchange = (e) => {
+      threshold = parseInt(e.target.value);
+    };
+    document.getElementById('showVectorsBtn').onclick = () => {
+      showVectors = !showVectors;
+      document.getElementById('showVectorsBtn').textContent = `Show Vectors: ${showVectors ? 'ON' : 'OFF'}`;
+      document.getElementById('showVectorsBtn').classList.toggle('active', showVectors);
+    };
+
+    async function initWebGPU() {
+      try {
+        // Check for WebGPU support
+        if (!navigator.gpu) {
+          throw new Error('WebGPU not supported on this browser.');
+        }
+
+        // Request adapter and device
+        const adapter = await navigator.gpu.requestAdapter();
+        if (!adapter) {
+          throw new Error('No appropriate GPUAdapter found.');
+        }
+
+        device = await adapter.requestDevice();
+
+        // Create shader module
+        const shaderModule = device.createShaderModule({
+          label: 'Motion Vector Shader',
+          code: `
+            struct Params {
+              blockSize: u32,
+              searchRadius: u32,
+              threshold: f32,
+              width: u32,
+              height: u32,
+            }
+
+            @group(0) @binding(0) var currentFrame: texture_2d<f32>;
+            @group(0) @binding(1) var previousFrame: texture_2d<f32>;
+            @group(0) @binding(2) var<uniform> params: Params;
+            @group(0) @binding(3) var<storage, read_write> motionVectors: array<vec4<f32>>;
+            @group(0) @binding(4) var linearSampler: sampler;
+
+            // Compute block variance and edge strength for better texture classification
+            fn computeBlockVariance(blockX: u32, blockY: u32) -> f32 {
+              var mean = vec3<f32>(0.0);
+              var meanSquared = vec3<f32>(0.0);
+              let blockSizeF = f32(params.blockSize * params.blockSize);
+              var edgeStrength = 0.0;
+              
+              // Single pass for mean and variance
+              for (var y: u32 = 0u; y < params.blockSize; y = y + 1u) {
+                for (var x: u32 = 0u; x < params.blockSize; x = x + 1u) {
+                  let pos = vec2<f32>(f32(blockX + x), f32(blockY + y)) / vec2<f32>(f32(params.width), f32(params.height));
+                  let pixel = textureSampleLevel(currentFrame, linearSampler, pos, 0.0);
+                  mean = mean + pixel.rgb;
+                  meanSquared = meanSquared + pixel.rgb * pixel.rgb;
+                  
+                  // Compute local gradients for edge detection
+                  if (x > 0u && x < params.blockSize - 1u && y > 0u && y < params.blockSize - 1u) {
+                    let leftPos = vec2<f32>(f32(blockX + x - 1u), f32(blockY + y)) / vec2<f32>(f32(params.width), f32(params.height));
+                    let rightPos = vec2<f32>(f32(blockX + x + 1u), f32(blockY + y)) / vec2<f32>(f32(params.width), f32(params.height));
+                    let topPos = vec2<f32>(f32(blockX + x), f32(blockY + y - 1u)) / vec2<f32>(f32(params.width), f32(params.height));
+                    let bottomPos = vec2<f32>(f32(blockX + x), f32(blockY + y + 1u)) / vec2<f32>(f32(params.width), f32(params.height));
+                    
+                    let left = textureSampleLevel(currentFrame, linearSampler, leftPos, 0.0).rgb;
+                    let right = textureSampleLevel(currentFrame, linearSampler, rightPos, 0.0).rgb;
+                    let top = textureSampleLevel(currentFrame, linearSampler, topPos, 0.0).rgb;
+                    let bottom = textureSampleLevel(currentFrame, linearSampler, bottomPos, 0.0).rgb;
+                    
+                    let gradX = abs(right.r - left.r) + abs(right.g - left.g) + abs(right.b - left.b);
+                    let gradY = abs(bottom.r - top.r) + abs(bottom.g - top.g) + abs(bottom.b - top.b);
+                    edgeStrength = edgeStrength + (gradX + gradY) / 6.0;
+                  }
+                }
+              }
+              
+              mean = mean / blockSizeF;
+              meanSquared = meanSquared / blockSizeF;
+              let variance = meanSquared - mean * mean;
+              let totalVariance = (variance.r + variance.g + variance.b) / 3.0;
+              
+              // Combine variance with edge strength for better texture detection
+              // High edge strength indicates detailed areas (faces, text)
+              // Low variance + low edges = uniform area (wall)
+              let edgeContribution = edgeStrength / max(f32(params.blockSize * params.blockSize) / 4.0, 1.0);
+              return totalVariance + edgeContribution * 0.5;
+            }
+
+            // Enhanced SAD with sub-pixel accuracy and gradient weighting
+            fn computeEnhancedSAD(blockX: u32, blockY: u32, offsetX: f32, offsetY: f32) -> f32 {
+              var sad: f32 = 0.0;
+              var gradientSAD: f32 = 0.0;
+              var colorHistogramDiff: f32 = 0.0;
+              let blockSizeF = f32(params.blockSize);
+              
+              // Color histogram bins for better color distribution matching
+              var currentHist = array<f32, 8>();
+              var prevHist = array<f32, 8>();
+              
+              for (var y: u32 = 0u; y < params.blockSize; y = y + 1u) {
+                for (var x: u32 = 0u; x < params.blockSize; x = x + 1u) {
+                  let currentPos = vec2<f32>(f32(blockX + x), f32(blockY + y)) / vec2<f32>(f32(params.width), f32(params.height));
+                  // Use bilinear interpolation for sub-pixel accuracy
+                  let previousPos = vec2<f32>(f32(blockX + x) + offsetX, f32(blockY + y) + offsetY) / vec2<f32>(f32(params.width), f32(params.height));
+                  
+                  let currentPixel = textureSampleLevel(currentFrame, linearSampler, currentPos, 0.0);
+                  let previousPixel = textureSampleLevel(previousFrame, linearSampler, previousPos, 0.0);
+                  
+                  // Luminance-weighted SAD (human vision is more sensitive to luminance)
+                  let currentLum = 0.299 * currentPixel.r + 0.587 * currentPixel.g + 0.114 * currentPixel.b;
+                  let prevLum = 0.299 * previousPixel.r + 0.587 * previousPixel.g + 0.114 * previousPixel.b;
+                  let lumDiff = abs(currentLum - prevLum);
+                  
+                  // Color difference with reduced weight
+                  let colorDiff = abs(currentPixel.r - previousPixel.r) * 0.3 + 
+                                 abs(currentPixel.g - previousPixel.g) * 0.5 + 
+                                 abs(currentPixel.b - previousPixel.b) * 0.2;
+                  
+                  sad = sad + lumDiff * 2.0 + colorDiff;
+                  
+                  // Update histograms
+                  let currentBin = u32(clamp(currentLum * 7.999, 0.0, 7.999));
+                  let prevBin = u32(clamp(prevLum * 7.999, 0.0, 7.999));
+                  currentHist[currentBin] = currentHist[currentBin] + 1.0;
+                  prevHist[prevBin] = prevHist[prevBin] + 1.0;
+                  
+                  // Compute gradients for edge-aware matching
+                  if (x > 0u && x < params.blockSize - 1u && y > 0u && y < params.blockSize - 1u) {
+                    // Sobel operators for better gradient estimation
+                    let currentLeft = textureSampleLevel(currentFrame, linearSampler, 
+                      vec2<f32>(f32(blockX + x - 1u), f32(blockY + y)) / vec2<f32>(f32(params.width), f32(params.height)), 0.0);
+                    let currentRight = textureSampleLevel(currentFrame, linearSampler, 
+                      vec2<f32>(f32(blockX + x + 1u), f32(blockY + y)) / vec2<f32>(f32(params.width), f32(params.height)), 0.0);
+                    let currentTop = textureSampleLevel(currentFrame, linearSampler,
+                      vec2<f32>(f32(blockX + x), f32(blockY + y - 1u)) / vec2<f32>(f32(params.width), f32(params.height)), 0.0);
+                    let currentBottom = textureSampleLevel(currentFrame, linearSampler,
+                      vec2<f32>(f32(blockX + x), f32(blockY + y + 1u)) / vec2<f32>(f32(params.width), f32(params.height)), 0.0);
+                    
+                    let currentGradX = (currentRight.rgb - currentLeft.rgb) * 0.5;
+                    let currentGradY = (currentBottom.rgb - currentTop.rgb) * 0.5;
+                    
+                    // Previous frame gradients with sub-pixel offset
+                    let prevLeft = textureSampleLevel(previousFrame, linearSampler,
+                      vec2<f32>(f32(blockX + x - 1u) + offsetX, f32(blockY + y) + offsetY) / vec2<f32>(f32(params.width), f32(params.height)), 0.0);
+                    let prevRight = textureSampleLevel(previousFrame, linearSampler,
+                      vec2<f32>(f32(blockX + x + 1u) + offsetX, f32(blockY + y) + offsetY) / vec2<f32>(f32(params.width), f32(params.height)), 0.0);
+                    let prevTop = textureSampleLevel(previousFrame, linearSampler,
+                      vec2<f32>(f32(blockX + x) + offsetX, f32(blockY + y - 1u) + offsetY) / vec2<f32>(f32(params.width), f32(params.height)), 0.0);
+                    let prevBottom = textureSampleLevel(previousFrame, linearSampler,
+                      vec2<f32>(f32(blockX + x) + offsetX, f32(blockY + y + 1u) + offsetY) / vec2<f32>(f32(params.width), f32(params.height)), 0.0);
+                    
+                    let prevGradX = (prevRight.rgb - prevLeft.rgb) * 0.5;
+                    let prevGradY = (prevBottom.rgb - prevTop.rgb) * 0.5;
+                    
+                    // Gradient magnitude difference
+                    let currentGradMag = length(currentGradX) + length(currentGradY);
+                    let prevGradMag = length(prevGradX) + length(prevGradY);
+                    let gradMagDiff = abs(currentGradMag - prevGradMag);
+                    
+                    // Gradient direction difference
+                    let gradDirDiff = length(currentGradX - prevGradX) + length(currentGradY - prevGradY);
+                    
+                    gradientSAD = gradientSAD + (gradMagDiff + gradDirDiff) * 1.5;
+                  }
+                }
+              }
+              
+              // Compute histogram difference (Chi-square distance)
+              for (var i: u32 = 0u; i < 8u; i = i + 1u) {
+                let diff = currentHist[i] - prevHist[i];
+                let sum = currentHist[i] + prevHist[i];
+                if (sum > 0.0) {
+                  colorHistogramDiff = colorHistogramDiff + (diff * diff) / sum;
+                }
+              }
+              
+              return sad + gradientSAD + colorHistogramDiff * 10.0;
+            }
+
+            @compute @workgroup_size(8, 8)
+            fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+              let blockX = global_id.x * params.blockSize;
+              let blockY = global_id.y * params.blockSize;
+              
+              if (blockX >= params.width || blockY >= params.height) {
+                return;
+              }
+              
+              // Compute block variance to determine texture complexity
+              let blockVariance = computeBlockVariance(blockX, blockY);
+              
+              // Adaptive threshold based on texture complexity
+              // Low variance (uniform areas like walls) = higher threshold (less sensitive)
+              // High variance (detailed areas like faces) = lower threshold (more sensitive)
+              let adaptiveThreshold = mix(
+                params.threshold * 2.0,  // High threshold for uniform areas
+                params.threshold * 0.3,  // Low threshold for detailed areas
+                clamp(blockVariance * 20.0, 0.0, 1.0)  // Normalize variance to 0-1
+              );
+              
+              // Hierarchical block matching with sub-pixel refinement
+              var bestSAD: f32 = 999999.0;
+              var bestMV = vec2<f32>(0.0, 0.0);
+              
+              // Adaptive search parameters based on texture complexity
+              let textureComplexity = clamp(blockVariance * 10.0, 0.0, 1.0);
+              let isLikelyFace = blockVariance > 0.005 && blockVariance < 0.05; // Faces have moderate variance
+              
+              // Dynamic search radius
+              let adaptiveSearchRadius = i32(mix(
+                f32(params.searchRadius) * 0.25,  // Very small for uniform areas
+                f32(params.searchRadius) * 1.5,   // Larger for complex areas
+                textureComplexity
+              ));
+              
+              // Coarse search first (step size 2 for speed)
+              let coarseStep = select(1, 2, adaptiveSearchRadius > 4);
+              for (var dy: i32 = -adaptiveSearchRadius; dy <= adaptiveSearchRadius; dy = dy + coarseStep) {
+                for (var dx: i32 = -adaptiveSearchRadius; dx <= adaptiveSearchRadius; dx = dx + coarseStep) {
+                  // Check boundaries
+                  if (i32(blockX) + dx < 0 || i32(blockY) + dy < 0 ||
+                      i32(blockX) + dx + i32(params.blockSize) > i32(params.width) ||
+                      i32(blockY) + dy + i32(params.blockSize) > i32(params.height)) {
+                    continue;
+                  }
+                  
+                  let sad = computeEnhancedSAD(blockX, blockY, f32(dx), f32(dy));
+                  
+                  // Smart biasing based on texture analysis
+                  var bias: f32 = 0.0;
+                  
+                  // Strong bias against motion in uniform areas
+                  if (textureComplexity < 0.1) {
+                    bias = 30.0 * sqrt(f32(dx * dx + dy * dy));
+                  } 
+                  // Slight bias for zero motion in moderately textured areas
+                  else if (textureComplexity < 0.3) {
+                    bias = 5.0 * sqrt(f32(dx * dx + dy * dy));
+                  }
+                  // No bias for highly textured areas (likely real detail)
+                  else {
+                    bias = 0.0;
+                  }
+                  
+                  // Extra sensitivity for face-like regions
+                  if (isLikelyFace) {
+                    bias = bias * 0.3; // Reduce bias to detect subtle movements
+                  }
+                  
+                  let biasedSAD = sad + bias;
+                  
+                  if (biasedSAD < bestSAD) {
+                    bestSAD = biasedSAD;
+                    bestMV = vec2<f32>(f32(dx), f32(dy));
+                  }
+                }
+              }
+              
+              // Fine search around best coarse match (sub-pixel refinement)
+              if (coarseStep > 1 && length(bestMV) > 0.1) {
+                let centerX = i32(bestMV.x);
+                let centerY = i32(bestMV.y);
+                
+                for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {
+                  for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {
+                    if (dx == 0 && dy == 0) { continue; }
+                    
+                    let testX = centerX + dx;
+                    let testY = centerY + dy;
+                    
+                    if (i32(blockX) + testX < 0 || i32(blockY) + testY < 0 ||
+                        i32(blockX) + testX + i32(params.blockSize) > i32(params.width) ||
+                        i32(blockY) + testY + i32(params.blockSize) > i32(params.height)) {
+                      continue;
+                    }
+                    
+                    let sad = computeEnhancedSAD(blockX, blockY, f32(testX), f32(testY));
+                    if (sad < bestSAD) {
+                      bestSAD = sad;
+                      bestMV = vec2<f32>(f32(testX), f32(testY));
+                    }
+                  }
+                }
+                
+                // Sub-pixel refinement using parabolic fitting
+                if (abs(bestMV.x) > 0.5 && abs(bestMV.y) > 0.5) {
+                  // Sample SAD at half-pixel positions
+                  let sadLeft = computeEnhancedSAD(blockX, blockY, bestMV.x - 0.5, bestMV.y);
+                  let sadRight = computeEnhancedSAD(blockX, blockY, bestMV.x + 0.5, bestMV.y);
+                  let sadTop = computeEnhancedSAD(blockX, blockY, bestMV.x, bestMV.y - 0.5);
+                  let sadBottom = computeEnhancedSAD(blockX, blockY, bestMV.x, bestMV.y + 0.5);
+                  
+                  // Parabolic interpolation for sub-pixel accuracy
+                  if (sadLeft < bestSAD && sadRight < bestSAD) {
+                    let denom = 2.0 * (sadLeft + sadRight - 2.0 * bestSAD);
+                    if (abs(denom) > 0.001) {
+                      bestMV.x = bestMV.x + (sadLeft - sadRight) / denom * 0.5;
+                    }
+                  }
+                  if (sadTop < bestSAD && sadBottom < bestSAD) {
+                    let denom = 2.0 * (sadTop + sadBottom - 2.0 * bestSAD);
+                    if (abs(denom) > 0.001) {
+                      bestMV.y = bestMV.y + (sadTop - sadBottom) / denom * 0.5;
+                    }
+                  }
+                }
+              }
+              
+              // Store motion vector with confidence
+              let blockIndex = global_id.y * (params.width / params.blockSize) + global_id.x;
+              
+              // Calculate motion magnitude and normalize SAD
+              let motionMagnitude = length(bestMV);
+              let normalizedSAD = bestSAD / f32(params.blockSize * params.blockSize);
+              
+              // Calculate confidence score based on multiple factors
+              let sadConfidence = 1.0 - clamp(normalizedSAD / adaptiveThreshold, 0.0, 1.0);
+              let motionConfidence = clamp(motionMagnitude / f32(params.searchRadius), 0.0, 1.0);
+              
+              // Different confidence thresholds for different texture types
+              var shouldStore = false;
+              
+              // Highly textured areas (faces, detailed objects)
+              if (blockVariance > 0.01) {
+                // More lenient threshold for detailed areas
+                shouldStore = normalizedSAD < adaptiveThreshold * 1.5 && 
+                            (motionMagnitude > 0.05 || normalizedSAD < adaptiveThreshold * 0.5);
+              }
+              // Moderately textured areas
+              else if (blockVariance > 0.001) {
+                // Standard threshold
+                shouldStore = normalizedSAD < adaptiveThreshold && motionMagnitude > 0.2;
+              }
+              // Uniform areas (walls)
+              else {
+                // Very strict threshold for uniform areas
+                shouldStore = normalizedSAD < adaptiveThreshold * 0.3 && motionMagnitude > 0.5;
+              }
+              
+              // Store motion vector with confidence in w component
+              if (shouldStore) {
+                let confidence = sadConfidence * mix(0.5, 1.0, clamp(blockVariance * 50.0, 0.0, 1.0));
+                motionVectors[blockIndex] = vec4<f32>(bestMV.x, bestMV.y, motionMagnitude, confidence);
+              } else {
+                motionVectors[blockIndex] = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+              }
+            }
+          `
+        });
+
+        // Create compute pipeline
+        pipeline = device.createComputePipeline({
+          label: 'Motion Vector Pipeline',
+          layout: 'auto',
+          compute: {
+            module: shaderModule,
+            entryPoint: 'main',
+          },
+        });
+
+        console.log('WebGPU initialized successfully');
+      } catch (error) {
+        console.error('WebGPU initialization failed:', error);
+        showError(error.message);
+      }
+    }
+
+    function showError(message) {
+      const errorDiv = document.getElementById('errorMessage');
+      errorDiv.textContent = message;
+      errorDiv.classList.add('show');
+    }
+
+    async function startCamera() {
+      try {
+        video = document.getElementById('video');
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { width: 320, height: 240 } 
+        });
+        video.srcObject = stream;
+        await video.play();
+
+        // Initialize WebGPU
+        await initWebGPU();
+
+        isRunning = true;
+        document.getElementById('startBtn').textContent = 'Stop Camera';
+        document.getElementById('startBtn').onclick = stopCamera;
+        
+        requestAnimationFrame(processFrame);
+      } catch (err) {
+        console.error('Error:', err);
+        showError('Camera error: ' + err.message);
+      }
+    }
+
+    function stopCamera() {
+      isRunning = false;
+      if (video && video.srcObject) {
+        video.srcObject.getTracks().forEach(track => track.stop());
+      }
+      document.getElementById('startBtn').textContent = 'Start Camera';
+      document.getElementById('startBtn').onclick = startCamera;
+    }
+
+    async function processFrame() {
+      if (!isRunning) return;
+
+      // Draw current frame
+      currentCtx.drawImage(video, 0, 0, 320, 240);
+      const currentImageData = currentCtx.getImageData(0, 0, 320, 240);
+      
+      // Calculate FPS
+      frameCount++;
+      const now = performance.now();
+      if (now - lastTime > 1000) {
+        document.getElementById('fps').textContent = Math.round(frameCount * 1000 / (now - lastTime));
+        frameCount = 0;
+        lastTime = now;
+      }
+
+      // Process motion vectors with WebGPU if we have a previous frame
+      if (device && pipeline && previousFrame) {
+        await computeMotionVectors(currentImageData, previousFrame);
+      }
+
+      // Store current frame as previous for next iteration
+      previousFrame = currentImageData;
+
+      requestAnimationFrame(processFrame);
+    }
+
+    async function computeMotionVectors(currentFrame, previousFrame) {
+      try {
+        // Create textures from image data
+        const textureSize = { width: 320, height: 240 };
+        
+        // Current frame texture
+        const currentTexture = device.createTexture({
+          size: textureSize,
+          format: 'rgba8unorm',
+          usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+        });
+        device.queue.writeTexture(
+          { texture: currentTexture },
+          currentFrame.data,
+          { bytesPerRow: 320 * 4 },
+          textureSize
+        );
+
+        // Previous frame texture
+        const previousTexture = device.createTexture({
+          size: textureSize,
+          format: 'rgba8unorm',
+          usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+        });
+        device.queue.writeTexture(
+          { texture: previousTexture },
+          previousFrame.data,
+          { bytesPerRow: 320 * 4 },
+          textureSize
+        );
+
+        // Create uniform buffer for parameters
+        const paramsBuffer = device.createBuffer({
+          size: 32, // 5 * 4 bytes, padded to 32
+          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+        const paramsData = new ArrayBuffer(32);
+        const paramsView = new DataView(paramsData);
+        paramsView.setUint32(0, blockSize, true);
+        paramsView.setUint32(4, searchRadius, true);
+        paramsView.setFloat32(8, threshold, true);
+        paramsView.setUint32(12, 320, true);
+        paramsView.setUint32(16, 240, true);
+        device.queue.writeBuffer(paramsBuffer, 0, paramsData);
+
+        // Create motion vector output buffer
+        const blocksX = Math.ceil(320 / blockSize);
+        const blocksY = Math.ceil(240 / blockSize);
+        const motionBufferSize = blocksX * blocksY * 16; // vec4<f32> per block
+        const motionBuffer = device.createBuffer({
+          size: motionBufferSize,
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+        });
+
+        // Create sampler
+        const sampler = device.createSampler({
+          magFilter: 'linear',
+          minFilter: 'linear',
+        });
+
+        // Create bind group
+        const bindGroup = device.createBindGroup({
+          layout: pipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: currentTexture.createView() },
+            { binding: 1, resource: previousTexture.createView() },
+            { binding: 2, resource: { buffer: paramsBuffer } },
+            { binding: 3, resource: { buffer: motionBuffer } },
+            { binding: 4, resource: sampler },
+          ],
+        });
+
+        // Encode and submit compute pass
+        const commandEncoder = device.createCommandEncoder();
+        const computePass = commandEncoder.beginComputePass();
+        computePass.setPipeline(pipeline);
+        computePass.setBindGroup(0, bindGroup);
+        computePass.dispatchWorkgroups(
+          Math.ceil(blocksX / 8),
+          Math.ceil(blocksY / 8)
+        );
+        computePass.end();
+
+        // Read back results
+        const readBuffer = device.createBuffer({
+          size: motionBufferSize,
+          usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+        });
+        commandEncoder.copyBufferToBuffer(motionBuffer, 0, readBuffer, 0, motionBufferSize);
+
+        device.queue.submit([commandEncoder.finish()]);
+
+        // Wait for GPU to finish and read results
+        await readBuffer.mapAsync(GPUMapMode.READ);
+        const motionData = new Float32Array(readBuffer.getMappedRange());
+        
+        // Process motion vectors
+        visualizeMotionVectors(motionData, blocksX, blocksY);
+        
+        readBuffer.unmap();
+
+        // Cleanup
+        currentTexture.destroy();
+        previousTexture.destroy();
+        paramsBuffer.destroy();
+        motionBuffer.destroy();
+        readBuffer.destroy();
+
+      } catch (error) {
+        console.error('Motion vector computation failed:', error);
+      }
+    }
+
+    function visualizeMotionVectors(motionData, blocksX, blocksY) {
+      // Clear motion canvas
+      motionCtx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      motionCtx.fillRect(0, 0, 320, 240);
+
+      // Draw current frame as background
+      motionCtx.globalAlpha = 0.3;
+      motionCtx.drawImage(currentCanvas, 0, 0);
+      motionCtx.globalAlpha = 1.0;
+
+      let motionCount = 0;
+      let totalMotion = 0;
+      let maxMotion = 0;
+      const events = [];
+
+      // Draw motion vectors
+      for (let by = 0; by < blocksY; by++) {
+        for (let bx = 0; bx < blocksX; bx++) {
+          const idx = (by * blocksX + bx) * 4;
+          const mvX = motionData[idx];
+          const mvY = motionData[idx + 1];
+          const magnitude = motionData[idx + 2];
+          const confidence = motionData[idx + 3];
+
+          if (confidence > 0.3 && magnitude > 0.1) { // Show motion based on confidence
+            motionCount++;
+            totalMotion += magnitude;
+            maxMotion = Math.max(maxMotion, magnitude);
+
+            const centerX = bx * blockSize + blockSize / 2;
+            const centerY = by * blockSize + blockSize / 2;
+
+            if (showVectors) {
+              // Draw motion vector arrow
+              motionCtx.strokeStyle = `hsl(${120 - magnitude * 10}, 100%, 50%)`;
+              motionCtx.lineWidth = Math.max(1, magnitude / 4);
+              motionCtx.beginPath();
+              motionCtx.moveTo(centerX, centerY);
+              motionCtx.lineTo(centerX + mvX * 2, centerY + mvY * 2);
+              motionCtx.stroke();
+
+              // Draw arrowhead
+              const angle = Math.atan2(mvY, mvX);
+              motionCtx.fillStyle = motionCtx.strokeStyle;
+              motionCtx.beginPath();
+              motionCtx.moveTo(centerX + mvX * 2, centerY + mvY * 2);
+              motionCtx.lineTo(
+                centerX + mvX * 2 - 5 * Math.cos(angle - Math.PI / 6),
+                centerY + mvY * 2 - 5 * Math.sin(angle - Math.PI / 6)
+              );
+              motionCtx.lineTo(
+                centerX + mvX * 2 - 5 * Math.cos(angle + Math.PI / 6),
+                centerY + mvY * 2 - 5 * Math.sin(angle + Math.PI / 6)
+              );
+              motionCtx.closePath();
+              motionCtx.fill();
+            }
+
+            // Draw block outline
+            motionCtx.strokeStyle = 'rgba(255, 255, 0, 0.5)';
+            motionCtx.lineWidth = 1;
+            motionCtx.strokeRect(bx * blockSize, by * blockSize, blockSize, blockSize);
+
+            // Create event for this motion
+            events.push({
+              x: bx * blockSize,
+              y: by * blockSize,
+              mvX: mvX,
+              mvY: mvY,
+              size: blockSize
+            });
+          }
+        }
+      }
+
+      // Update stats
+      document.getElementById('motionBlocks').textContent = motionCount;
+      document.getElementById('avgMotion').textContent = motionCount > 0 ? 
+        (totalMotion / motionCount).toFixed(1) + ' px' : '0.0 px';
+      document.getElementById('maxMotion').textContent = maxMotion.toFixed(1) + ' px';
+
+      // Update event stats
+      eventCount += events.length;
+      const now = performance.now();
+      if (now - lastEventTime > 1000) {
+        document.getElementById('eventsPerSec').textContent = eventCount;
+        eventCount = 0;
+        lastEventTime = now;
+      }
+
+      // Calculate data size (motion vectors only for blocks that moved)
+      const dataSize = events.length * 4; // 4 bytes per motion vector (2 components * 2 bytes)
+      document.getElementById('dataSize').textContent = (dataSize / 1024).toFixed(2) + ' KB';
+      
+      const rawSize = 320 * 240 * 3;
+      document.getElementById('compression').textContent = 
+        dataSize > 0 ? Math.round(rawSize / dataSize) + 'x' : '∞';
+
+      // Apply motion compensation to output
+      applyMotionCompensation(events);
+    }
+
+    function applyMotionCompensation(events) {
+      // Copy previous frame to output
+      if (previousFrame) {
+        outputCtx.putImageData(previousFrame, 0, 0);
+      }
+
+      // Apply motion updates
+      events.forEach(event => {
+        // Copy block from current frame with motion offset
+        const imageData = currentCtx.getImageData(
+          event.x, event.y, event.size, event.size
+        );
+        outputCtx.putImageData(imageData, 
+          event.x + Math.round(event.mvX), 
+          event.y + Math.round(event.mvY)
+        );
+
+        // Highlight updated blocks
+        outputCtx.strokeStyle = 'rgba(0, 255, 0, 0.3)';
+        outputCtx.lineWidth = 1;
+        outputCtx.strokeRect(event.x, event.y, event.size, event.size);
+      });
+    }
+  </script>
+</body>
+</html>
