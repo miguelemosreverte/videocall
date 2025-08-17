@@ -247,6 +247,7 @@
     let lastEventTime = performance.now();
     let keyFrame = null; // Store the initial keyframe
     let framesSinceKeyframe = 0;
+    let accumulatedFrame = null; // Store the accumulated reconstruction
 
     // Canvas contexts
     const currentCanvas = document.getElementById('currentCanvas');
@@ -937,9 +938,10 @@
       const needsKeyframe = keyframeInterval > 0 && 
                            (!keyFrame || framesSinceKeyframe >= keyframeInterval);
       
-      if (needsKeyframe) {
+      if (needsKeyframe || !accumulatedFrame) {
         // New keyframe needed - this would be transmitted as full image
         keyFrame = currentCtx.getImageData(0, 0, 320, 240);
+        accumulatedFrame = currentCtx.getImageData(0, 0, 320, 240); // Reset accumulated frame
         framesSinceKeyframe = 0;
         
         // Show that we're sending a keyframe
@@ -956,21 +958,16 @@
         return;
       }
 
-      // Start with BLACK (or last reconstructed frame if you're accumulating)
-      // This simulates what the receiver would see with ONLY the events
-      outputCtx.fillStyle = 'black';
-      outputCtx.fillRect(0, 0, 320, 240);
-      
-      // If we have a keyframe, show it dimmed as the base
-      if (keyFrame) {
-        outputCtx.putImageData(keyFrame, 0, 0);
-        // Darken it to show it's old (more darkening for older frames)
-        const darkness = Math.min(0.7, 0.2 + (framesSinceKeyframe / 100) * 0.5);
-        outputCtx.fillStyle = `rgba(0, 0, 0, ${darkness})`;
+      // Start with the accumulated frame (what we've built up so far)
+      if (accumulatedFrame) {
+        outputCtx.putImageData(accumulatedFrame, 0, 0);
+      } else {
+        // Fallback to black if no accumulated frame
+        outputCtx.fillStyle = 'black';
         outputCtx.fillRect(0, 0, 320, 240);
       }
 
-      // Apply ONLY the motion events (this is all that would be transmitted)
+      // Apply NEW motion events on top of accumulated frame
       events.forEach(event => {
         // Copy block from current frame - this is what gets sent
         const imageData = currentCtx.getImageData(
@@ -978,21 +975,36 @@
         );
         
         // Place it at the motion-compensated position
-        outputCtx.putImageData(imageData, 
-          event.x + Math.round(event.mvX), 
-          event.y + Math.round(event.mvY)
-        );
+        const destX = event.x + Math.round(event.mvX);
+        const destY = event.y + Math.round(event.mvY);
+        outputCtx.putImageData(imageData, destX, destY);
 
         // Only show green blocks if enabled
         if (showBlocks) {
           outputCtx.strokeStyle = 'rgba(0, 255, 0, 0.5)';
           outputCtx.lineWidth = 1;
-          outputCtx.strokeRect(
-            event.x + Math.round(event.mvX), 
-            event.y + Math.round(event.mvY), 
-            event.size, event.size
-          );
+          outputCtx.strokeRect(destX, destY, event.size, event.size);
         }
+      });
+      
+      // Save the current output as the new accumulated frame
+      accumulatedFrame = outputCtx.getImageData(0, 0, 320, 240);
+      
+      // Show slight aging effect on old parts
+      if (framesSinceKeyframe > 30) {
+        const agingAlpha = Math.min(0.02, framesSinceKeyframe / 3000);
+        outputCtx.fillStyle = `rgba(0, 0, 0, ${agingAlpha})`;
+        outputCtx.fillRect(0, 0, 320, 240);
+      }
+      
+      // Redraw the recent events on top (so they stay bright)
+      events.forEach(event => {
+        const imageData = currentCtx.getImageData(
+          event.x, event.y, event.size, event.size
+        );
+        const destX = event.x + Math.round(event.mvX);
+        const destY = event.y + Math.round(event.mvY);
+        outputCtx.putImageData(imageData, destX, destY);
       });
       
       // Show event count overlay
@@ -1000,15 +1012,22 @@
       outputCtx.font = '12px monospace';
       outputCtx.fillText(`Events: ${events.length}`, 10, 20);
       
-      // Show time since keyframe if no keyframe set
+      // Show time since keyframe
       if (keyframeInterval === 0 && !keyFrame) {
         outputCtx.fillStyle = 'rgba(255, 100, 100, 0.8)';
-        outputCtx.fillText('No keyframe (set to Never)', 10, 35);
+        outputCtx.fillText('No keyframe (pure events)', 10, 35);
       } else if (keyframeInterval > 0) {
         const secondsSinceKeyframe = (framesSinceKeyframe / 30).toFixed(1);
         outputCtx.fillStyle = 'rgba(200, 200, 200, 0.8)';
         outputCtx.fillText(`${secondsSinceKeyframe}s since keyframe`, 10, 35);
       }
+      
+      // Show total blocks updated
+      const totalBlocksUpdated = events.length;
+      const totalBlocks = (320 / blockSize) * (240 / blockSize);
+      const percentUpdated = ((totalBlocksUpdated / totalBlocks) * 100).toFixed(1);
+      outputCtx.fillStyle = 'rgba(200, 200, 200, 0.8)';
+      outputCtx.fillText(`${percentUpdated}% blocks updated`, 10, 50);
     }
   </script>
 </body>
