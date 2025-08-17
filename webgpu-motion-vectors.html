@@ -155,8 +155,10 @@
       </select>
       <select id="threshold">
         <option value="5">Very Sensitive</option>
-        <option value="10" selected>Normal</option>
-        <option value="20">Less Sensitive</option>
+        <option value="10">Sensitive</option>
+        <option value="20" selected>Normal</option>
+        <option value="40">Less Sensitive</option>
+        <option value="80">Very Insensitive</option>
       </select>
       <button id="showVectorsBtn">Show Vectors: ON</button>
       <button id="showBlocksBtn">Show Blocks: OFF</button>
@@ -236,7 +238,7 @@
     let device, context;
     let blockSize = 4; // Start with small blocks for adaptive mode
     let searchRadius = 8;
-    let threshold = 10;
+    let threshold = 20; // Higher default threshold to ignore noise
     let showVectors = true;
     let showBlocks = false; // Default to not showing green squares
     let keyframeInterval = 0; // Default to never (pure motion compensation)
@@ -621,32 +623,31 @@
               var shouldStore = false;
               
               // Highly textured areas (faces, detailed objects)
-              if (blockVariance > 0.01) {
-                // More lenient threshold for detailed areas
-                shouldStore = normalizedSAD < adaptiveThreshold * 1.5 && 
-                            (motionMagnitude > 0.05 || normalizedSAD < adaptiveThreshold * 0.5);
+              if (blockVariance > 0.02) {
+                // Face/detail areas - only store if significant motion
+                shouldStore = normalizedSAD < adaptiveThreshold && motionMagnitude > 1.0;
               }
               // Moderately textured areas
-              else if (blockVariance > 0.001) {
-                // Standard threshold
-                shouldStore = normalizedSAD < adaptiveThreshold && motionMagnitude > 0.2;
+              else if (blockVariance > 0.005) {
+                // Standard threshold - need real motion
+                shouldStore = normalizedSAD < adaptiveThreshold * 0.7 && motionMagnitude > 2.0;
               }
-              // Uniform areas (walls)
+              // Uniform areas (walls, backgrounds)
               else {
-                // Very strict threshold for uniform areas
-                shouldStore = normalizedSAD < adaptiveThreshold * 0.3 && motionMagnitude > 0.5;
+                // Very strict - almost never update uniform areas
+                shouldStore = normalizedSAD < adaptiveThreshold * 0.1 && motionMagnitude > 3.0;
               }
               
               // Store motion vector with confidence in w component
-              // ALWAYS store something to ensure coverage
+              // ONLY store blocks that actually changed or moved
               let confidence = sadConfidence * mix(0.5, 1.0, clamp(blockVariance * 50.0, 0.0, 1.0));
               
-              // Even if no motion detected, store with low confidence to ensure block gets updated
-              if (shouldStore || normalizedSAD > 0.01) {
-                motionVectors[blockIndex] = vec4<f32>(bestMV.x, bestMV.y, motionMagnitude, max(confidence, 0.1));
+              // Only store if there's real motion or significant change
+              if (shouldStore && (motionMagnitude > 0.5 || normalizedSAD > adaptiveThreshold * 0.8)) {
+                motionVectors[blockIndex] = vec4<f32>(bestMV.x, bestMV.y, motionMagnitude, confidence);
               } else {
-                // Even static blocks need minimal confidence for appearance updates
-                motionVectors[blockIndex] = vec4<f32>(0.0, 0.0, 0.0, 0.1);
+                // No update needed for static blocks
+                motionVectors[blockIndex] = vec4<f32>(0.0, 0.0, 0.0, 0.0);
               }
             }
           `
@@ -869,9 +870,9 @@
             const magnitude = motionData[idx + 2];
             const confidence = motionData[idx + 3];
             
-            // Include ALL blocks that have ANY change
-            // Lower threshold to catch subtle changes
-            if (confidence > 0.05 || magnitude > 0.05) {
+            // Only include blocks with significant motion or change
+            // Higher threshold to ignore noise
+            if (confidence > 0.3 || magnitude > 0.5) {
               events.push({
                 x: bx * blockSize,
                 y: by * blockSize,
@@ -946,7 +947,7 @@
             const confidence = motionData[idx + 3];
             const magnitude = motionData[idx + 2];
             
-            if (confidence > 0.05 || magnitude > 0.05) {
+            if (confidence > 0.3 || magnitude > 0.5) {
               merged.push({
                 x: bx * blockSize,
                 y: by * blockSize,
