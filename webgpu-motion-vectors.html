@@ -161,9 +161,9 @@
       <button id="showVectorsBtn">Show Vectors: ON</button>
       <button id="showBlocksBtn">Show Blocks: OFF</button>
       <select id="keyframeInterval">
-        <option value="0">Keyframes: Never</option>
+        <option value="0" selected>Keyframes: Never</option>
         <option value="30">Every 1 second</option>
-        <option value="60" selected>Every 2 seconds</option>
+        <option value="60">Every 2 seconds</option>
         <option value="150">Every 5 seconds</option>
         <option value="300">Every 10 seconds</option>
       </select>
@@ -239,7 +239,7 @@
     let threshold = 10;
     let showVectors = true;
     let showBlocks = false; // Default to not showing green squares
-    let keyframeInterval = 60; // Default to every 2 seconds
+    let keyframeInterval = 0; // Default to never (pure motion compensation)
     let adaptiveMode = true; // Default to adaptive quadtree merging
     let frameCount = 0;
     let lastTime = performance.now();
@@ -638,11 +638,15 @@
               }
               
               // Store motion vector with confidence in w component
-              if (shouldStore) {
-                let confidence = sadConfidence * mix(0.5, 1.0, clamp(blockVariance * 50.0, 0.0, 1.0));
-                motionVectors[blockIndex] = vec4<f32>(bestMV.x, bestMV.y, motionMagnitude, confidence);
+              // ALWAYS store something to ensure coverage
+              let confidence = sadConfidence * mix(0.5, 1.0, clamp(blockVariance * 50.0, 0.0, 1.0));
+              
+              // Even if no motion detected, store with low confidence to ensure block gets updated
+              if (shouldStore || normalizedSAD > 0.01) {
+                motionVectors[blockIndex] = vec4<f32>(bestMV.x, bestMV.y, motionMagnitude, max(confidence, 0.1));
               } else {
-                motionVectors[blockIndex] = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+                // Even static blocks need minimal confidence for appearance updates
+                motionVectors[blockIndex] = vec4<f32>(0.0, 0.0, 0.0, 0.1);
               }
             }
           `
@@ -843,10 +847,19 @@
       }
     }
 
+    // Blend two image data objects
+    function blendImageData(target, source, alpha) {
+      for (let i = 0; i < target.data.length; i += 4) {
+        target.data[i] = target.data[i] * (1 - alpha) + source.data[i] * alpha;
+        target.data[i + 1] = target.data[i + 1] * (1 - alpha) + source.data[i + 1] * alpha;
+        target.data[i + 2] = target.data[i + 2] * (1 - alpha) + source.data[i + 2] * alpha;
+      }
+    }
+    
     // Adaptive quadtree merging of motion vectors
     function mergeAdaptiveBlocks(motionData, blocksX, blocksY) {
       if (!adaptiveMode) {
-        // No merging in fixed mode - return raw blocks
+        // No merging in fixed mode - return ALL blocks (moving or changed)
         const events = [];
         for (let by = 0; by < blocksY; by++) {
           for (let bx = 0; bx < blocksX; bx++) {
@@ -856,14 +869,17 @@
             const magnitude = motionData[idx + 2];
             const confidence = motionData[idx + 3];
             
-            if (confidence > 0.3 && magnitude > 0.1) {
+            // Include ALL blocks that have ANY change
+            // Lower threshold to catch subtle changes
+            if (confidence > 0.05 || magnitude > 0.05) {
               events.push({
                 x: bx * blockSize,
                 y: by * blockSize,
                 mvX: mvX,
                 mvY: mvY,
                 size: blockSize,
-                confidence: confidence
+                confidence: confidence,
+                needsUpdate: true
               });
             }
           }
@@ -930,7 +946,7 @@
             const confidence = motionData[idx + 3];
             const magnitude = motionData[idx + 2];
             
-            if (confidence > 0.3 && magnitude > 0.1) {
+            if (confidence > 0.05 || magnitude > 0.05) {
               merged.push({
                 x: bx * blockSize,
                 y: by * blockSize,
@@ -1110,102 +1126,84 @@
     }
 
     function applyMotionCompensation(events) {
-      // Handle keyframe interval (0 means never)
+      // For true motion compensation without keyframes, we need to:
+      // 1. Clear areas where blocks moved FROM (to prevent smearing)
+      // 2. Draw blocks at their new positions
+      
       framesSinceKeyframe++;
       
-      const needsKeyframe = keyframeInterval > 0 && 
-                           (!keyFrame || framesSinceKeyframe >= keyframeInterval);
-      
-      if (needsKeyframe || !accumulatedFrame) {
-        // New keyframe needed - this would be transmitted as full image
-        keyFrame = currentCtx.getImageData(0, 0, 320, 240);
-        accumulatedFrame = currentCtx.getImageData(0, 0, 320, 240); // Reset accumulated frame
-        framesSinceKeyframe = 0;
+      // Initial frame setup (only happens once)
+      if (!accumulatedFrame) {
+        // First frame needs to be complete
+        accumulatedFrame = currentCtx.getImageData(0, 0, 320, 240);
+        outputCtx.putImageData(accumulatedFrame, 0, 0);
         
-        // Show that we're sending a keyframe
-        outputCtx.putImageData(keyFrame, 0, 0);
-        
-        // Visual indicator of keyframe
         outputCtx.fillStyle = 'rgba(255, 255, 0, 0.5)';
         outputCtx.font = 'bold 16px monospace';
-        outputCtx.fillText('KEYFRAME', 10, 30);
+        outputCtx.fillText('INITIAL FRAME', 10, 30);
+        return;
+      }
+      
+      // Optional keyframe reset (but we want to avoid this)
+      if (keyframeInterval > 0 && framesSinceKeyframe >= keyframeInterval) {
+        accumulatedFrame = currentCtx.getImageData(0, 0, 320, 240);
+        framesSinceKeyframe = 0;
+        outputCtx.putImageData(accumulatedFrame, 0, 0);
         
-        // Update stats to show keyframe size
-        const keyframeSize = 320 * 240 * 3 / 4; // Rough JPEG estimate
-        document.getElementById('dataSize').textContent = (keyframeSize / 1024).toFixed(2) + ' KB (keyframe)';
+        outputCtx.fillStyle = 'rgba(255, 255, 0, 0.5)';
+        outputCtx.font = 'bold 16px monospace';
+        outputCtx.fillText('KEYFRAME RESET', 10, 30);
         return;
       }
 
-      // Start with the accumulated frame (what we've built up so far)
-      if (accumulatedFrame) {
-        outputCtx.putImageData(accumulatedFrame, 0, 0);
-      } else {
-        // Fallback to black if no accumulated frame
-        outputCtx.fillStyle = 'black';
-        outputCtx.fillRect(0, 0, 320, 240);
-      }
-
-      // Apply NEW motion events on top of accumulated frame
+      // Start with previous accumulated frame
+      outputCtx.putImageData(accumulatedFrame, 0, 0);
+      
+      // Apply motion compensation: update blocks that changed or moved
       events.forEach(event => {
-        // Copy block from current frame - this is what gets sent
-        const imageData = currentCtx.getImageData(
-          event.x, event.y, event.size, event.size
-        );
+        const currentX = event.x;
+        const currentY = event.y;
         
-        // Place it at the motion-compensated position
-        const destX = event.x + Math.round(event.mvX);
-        const destY = event.y + Math.round(event.mvY);
-        outputCtx.putImageData(imageData, destX, destY);
-
-        // Only show green blocks if enabled
-        if (showBlocks) {
-          outputCtx.strokeStyle = 'rgba(0, 255, 0, 0.5)';
-          outputCtx.lineWidth = 1;
-          outputCtx.strokeRect(destX, destY, event.size, event.size);
-        }
+        // Always update the block from the current frame
+        // This handles both motion and appearance changes
+        const blockData = currentCtx.getImageData(currentX, currentY, event.size, event.size);
+        outputCtx.putImageData(blockData, currentX, currentY);
       });
       
       // Save the current output as the new accumulated frame
       accumulatedFrame = outputCtx.getImageData(0, 0, 320, 240);
       
-      // Show slight aging effect on old parts
-      if (framesSinceKeyframe > 30) {
-        const agingAlpha = Math.min(0.02, framesSinceKeyframe / 3000);
-        outputCtx.fillStyle = `rgba(0, 0, 0, ${agingAlpha})`;
-        outputCtx.fillRect(0, 0, 320, 240);
+      // Show block outlines if enabled
+      if (showBlocks) {
+        events.forEach(event => {
+          const blockColors = {
+            4: 'rgba(255, 100, 100, 0.5)',
+            8: 'rgba(255, 255, 100, 0.5)',
+            16: 'rgba(100, 255, 100, 0.5)'
+          };
+          outputCtx.strokeStyle = blockColors[event.size] || 'rgba(255, 255, 255, 0.5)';
+          outputCtx.lineWidth = 1;
+          outputCtx.strokeRect(event.x, event.y, event.size, event.size);
+        });
       }
       
-      // Redraw the recent events on top (so they stay bright)
-      events.forEach(event => {
-        const imageData = currentCtx.getImageData(
-          event.x, event.y, event.size, event.size
-        );
-        const destX = event.x + Math.round(event.mvX);
-        const destY = event.y + Math.round(event.mvY);
-        outputCtx.putImageData(imageData, destX, destY);
-      });
-      
-      // Show event count overlay
+      // Show stats
       outputCtx.fillStyle = 'rgba(0, 255, 0, 0.8)';
       outputCtx.font = '12px monospace';
       outputCtx.fillText(`Events: ${events.length}`, 10, 20);
       
-      // Show time since keyframe
-      if (keyframeInterval === 0 && !keyFrame) {
-        outputCtx.fillStyle = 'rgba(255, 100, 100, 0.8)';
-        outputCtx.fillText('No keyframe (pure events)', 10, 35);
-      } else if (keyframeInterval > 0) {
+      if (keyframeInterval === 0) {
+        outputCtx.fillStyle = 'rgba(100, 255, 100, 0.8)';
+        outputCtx.fillText('Pure motion compensation (no keyframes)', 10, 35);
+        
+        // Track coverage to detect areas that need updating
+        const coverage = (events.length * 16) / (320 * 240) * 100;
+        outputCtx.fillText(`Coverage: ${coverage.toFixed(1)}%`, 10, 50);
+      } else {
         const secondsSinceKeyframe = (framesSinceKeyframe / 30).toFixed(1);
         outputCtx.fillStyle = 'rgba(200, 200, 200, 0.8)';
         outputCtx.fillText(`${secondsSinceKeyframe}s since keyframe`, 10, 35);
       }
-      
-      // Show total blocks updated
-      const totalBlocksUpdated = events.length;
-      const totalBlocks = (320 / blockSize) * (240 / blockSize);
-      const percentUpdated = ((totalBlocksUpdated / totalBlocks) * 100).toFixed(1);
-      outputCtx.fillStyle = 'rgba(200, 200, 200, 0.8)';
-      outputCtx.fillText(`${percentUpdated}% blocks updated`, 10, 50);
     }
   </script>
 </body>
