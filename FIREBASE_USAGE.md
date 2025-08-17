@@ -12,10 +12,12 @@
   - **Storage**: X KB / 1 GB limit  
   - **Concurrent Connections**: X / 100 limit
 
-### Current Usage (as of last check)
-- **Downloads (7d total)**: 745 KB
-- **Storage (current)**: 11.5 KB
-- **Status**: Well within free tier limits (< 0.1% usage)
+### Current Usage (as of August 2024)
+- **Downloads (monthly total)**: 3.66 GB / 10 GB (36.6% used)
+- **Storage (current)**: 11.62 KB / 1 GB
+- **Connections**: 3 / 100
+- **Remaining this month**: 6.34 GB
+- **Status**: Within free tier, resets September 1st
 
 ## Free Tier (Spark Plan) Limits
 - **10 GB/month** bandwidth (downloads)

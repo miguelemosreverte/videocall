@@ -1,0 +1,1022 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Video Compression Demo - Adaptive Quadtree</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      overflow-x: hidden;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 10px;
+      font-size: 2em;
+    }
+
+    .subtitle {
+      text-align: center;
+      opacity: 0.9;
+      margin-bottom: 30px;
+    }
+
+    .controls {
+      display: flex;
+      gap: 20px;
+      justify-content: center;
+      margin-bottom: 30px;
+      flex-wrap: wrap;
+    }
+
+    button, select {
+      padding: 10px 20px;
+      font-size: 16px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      background: white;
+      color: #667eea;
+      transition: all 0.3s;
+    }
+
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    }
+
+    button.active {
+      background: #fbbf24;
+      color: #1f2937;
+    }
+
+    .demo-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+
+    .demo-box {
+      background: rgba(255,255,255,0.1);
+      border-radius: 10px;
+      padding: 15px;
+      backdrop-filter: blur(10px);
+    }
+
+    .demo-box h3 {
+      margin-bottom: 10px;
+      font-size: 1.2em;
+    }
+
+    canvas {
+      width: 100%;
+      height: auto;
+      border-radius: 5px;
+      background: #000;
+    }
+
+    video {
+      display: none;
+    }
+
+    .stats {
+      background: rgba(0,0,0,0.5);
+      padding: 10px;
+      border-radius: 5px;
+      margin-top: 10px;
+      font-family: monospace;
+      font-size: 14px;
+    }
+
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      margin: 5px 0;
+    }
+
+    .stat-label {
+      opacity: 0.8;
+    }
+
+    .stat-value {
+      color: #fbbf24;
+      font-weight: bold;
+    }
+
+    .bandwidth-meter {
+      height: 30px;
+      background: rgba(0,0,0,0.3);
+      border-radius: 15px;
+      overflow: hidden;
+      margin-top: 10px;
+      position: relative;
+    }
+
+    .bandwidth-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #10b981 0%, #fbbf24 50%, #ef4444 100%);
+      transition: width 0.3s;
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+    }
+
+    .bandwidth-text {
+      font-size: 12px;
+      font-weight: bold;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+    }
+
+    .layer-info {
+      display: flex;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .layer-badge {
+      background: rgba(0,0,0,0.5);
+      padding: 5px 10px;
+      border-radius: 15px;
+      font-size: 12px;
+    }
+
+    .layer-badge.low-pass {
+      border: 2px solid #10b981;
+    }
+
+    .layer-badge.mid-pass {
+      border: 2px solid #fbbf24;
+    }
+
+    .layer-badge.high-pass {
+      border: 2px solid #ef4444;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎥 Adaptive Quadtree Video Compression</h1>
+    <p class="subtitle">Multi-Resolution with Noise-Resistant Event Detection</p>
+
+    <div class="controls">
+      <button id="startBtn">Start Camera</button>
+      <select id="quality">
+        <option value="0.1">0.1</option>
+        <option value="0.2">0.2</option>
+        <option value="0.3">0.3</option>
+        <option value="0.4">0.4</option>
+        <option value="0.5">0.5</option>
+        <option value="0.6">0.6</option>
+        <option value="0.7">0.7</option>
+        <option value="0.8">0.8</option>
+        <option value="0.9">0.9</option>
+        <option value="0.95">0.95</option>
+        <option value="0.98">0.98</option>
+        <option value="0.99">0.99</option>
+        <option value="0.995">0.995</option>
+        <option value="0.999" selected>0.999</option>
+      </select>
+      <select id="noiseThreshold">
+        <option value="5">Very Sensitive</option>
+        <option value="15" selected>Normal</option>
+        <option value="25">Noise Resistant</option>
+        <option value="40">Very Noise Resistant</option>
+      </select>
+      <button id="eventBtn">Event Mode: OFF</button>
+      <button id="showQuadtreeBtn">Show Quadtree: OFF</button>
+      <select id="taa" title="Temporal Anti-Aliasing - blend with previous frames">
+        <option value="0">TAA: Off</option>
+        <option value="0.1">TAA: 0.1</option>
+        <option value="0.2">TAA: 0.2</option>
+        <option value="0.3" selected>TAA: 0.3</option>
+        <option value="0.5">TAA: 0.5</option>
+        <option value="0.7">TAA: 0.7</option>
+        <option value="0.9">TAA: 0.9</option>
+      </select>
+    </div>
+
+    <div class="demo-grid">
+      <!-- Original Video -->
+      <div class="demo-box">
+        <h3>📹 Original Feed</h3>
+        <canvas id="originalCanvas" width="320" height="240"></canvas>
+        <div class="stats">
+          <div class="stat-row">
+            <span class="stat-label">Resolution:</span>
+            <span class="stat-value">320x240</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Raw Frame Size:</span>
+            <span class="stat-value" id="rawSize">0 KB</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">FPS:</span>
+            <span class="stat-value" id="fps">0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quadtree Compression -->
+      <div class="demo-box">
+        <h3>🌳 Adaptive Quadtree Compression</h3>
+        <canvas id="compressedCanvas" width="320" height="240"></canvas>
+        <div class="stats">
+          <div class="stat-row">
+            <span class="stat-label">Total Nodes:</span>
+            <span class="stat-value" id="totalNodes">0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Leaf Nodes:</span>
+            <span class="stat-value" id="leafNodes">0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Changed Nodes:</span>
+            <span class="stat-value" id="changedNodes">0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Data Size:</span>
+            <span class="stat-value" id="dataSize">0 KB</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Compression:</span>
+            <span class="stat-value" id="compression">0x</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">PSNR:</span>
+            <span class="stat-value" id="psnr">0 dB</span>
+          </div>
+        </div>
+        <div class="layer-info">
+          <div class="layer-badge low-pass">
+            <span>Low: </span><span id="lowPassCount">0</span>
+          </div>
+          <div class="layer-badge mid-pass">
+            <span>Mid: </span><span id="midPassCount">0</span>
+          </div>
+          <div class="layer-badge high-pass">
+            <span>High: </span><span id="highPassCount">0</span>
+          </div>
+        </div>
+        <div class="bandwidth-meter">
+          <div class="bandwidth-bar" id="bandwidth" style="width: 10%">
+            <span class="bandwidth-text" id="bandwidthText">0 KB/s</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quadtree Visualization -->
+      <div class="demo-box">
+        <h3>🔍 Quadtree Structure</h3>
+        <canvas id="quadtreeCanvas" width="320" height="240"></canvas>
+        <div class="stats">
+          <div class="stat-row">
+            <span class="stat-label">Max Depth:</span>
+            <span class="stat-value" id="maxDepth">0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">64x64 blocks:</span>
+            <span class="stat-value" id="largeBlocks">0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">32x32 blocks:</span>
+            <span class="stat-value" id="mediumBlocks">0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">16x16 blocks:</span>
+            <span class="stat-value" id="smallBlocks">0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">8x8 blocks:</span>
+            <span class="stat-value" id="tinyBlocks">0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">4x4 blocks:</span>
+            <span class="stat-value" id="microBlocks">0</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <video id="video" playsinline></video>
+
+  <script>
+    // Global state
+    let video, isRunning = false;
+    let quality = 0.999; // Default to maximum quality
+    let noiseThreshold = 15;
+    let eventMode = false; // Default to OFF for better performance
+    let showQuadtree = false;
+    let taaBlend = 0.3; // Temporal Anti-Aliasing blend factor
+    let frameCount = 0;
+    let lastTime = performance.now();
+    let lastQuadtree = null;
+    let reconstructedImage = null;
+    let previousReconstructed = null; // For TAA
+    let previousFrame = null;
+
+    // Canvas contexts
+    const originalCanvas = document.getElementById('originalCanvas');
+    const compressedCanvas = document.getElementById('compressedCanvas');
+    const quadtreeCanvas = document.getElementById('quadtreeCanvas');
+    const originalCtx = originalCanvas.getContext('2d');
+    const compressedCtx = compressedCanvas.getContext('2d');
+    const quadtreeCtx = quadtreeCanvas.getContext('2d');
+
+    // Quadtree node class
+    class QuadNode {
+      constructor(x, y, size, depth = 0) {
+        this.x = x;
+        this.y = y;
+        this.size = size;
+        this.depth = depth;
+        this.children = null;
+        this.isLeaf = true;
+        this.color = null;
+        this.variance = 0;
+        this.changed = false;
+      }
+
+      subdivide() {
+        if (this.size <= 2) return; // Minimum block size is now 2x2
+        
+        this.isLeaf = false;
+        const halfSize = Math.floor(this.size / 2);
+        this.children = [
+          new QuadNode(this.x, this.y, halfSize, this.depth + 1),
+          new QuadNode(this.x + halfSize, this.y, halfSize, this.depth + 1),
+          new QuadNode(this.x, this.y + halfSize, halfSize, this.depth + 1),
+          new QuadNode(this.x + halfSize, this.y + halfSize, halfSize, this.depth + 1)
+        ];
+      }
+    }
+
+    // Initialize
+    document.getElementById('startBtn').onclick = startCamera;
+    document.getElementById('quality').onchange = (e) => {
+      quality = parseFloat(e.target.value);
+    };
+    document.getElementById('noiseThreshold').onchange = (e) => {
+      noiseThreshold = parseInt(e.target.value);
+    };
+    document.getElementById('eventBtn').onclick = toggleEventMode;
+    document.getElementById('showQuadtreeBtn').onclick = toggleQuadtree;
+    document.getElementById('taa').onchange = (e) => {
+      taaBlend = parseFloat(e.target.value);
+      previousReconstructed = null; // Reset TAA buffer on change
+    };
+
+    async function startCamera() {
+      try {
+        video = document.getElementById('video');
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { width: 320, height: 240 } 
+        });
+        video.srcObject = stream;
+        await video.play();
+
+        isRunning = true;
+        document.getElementById('startBtn').textContent = 'Stop Camera';
+        document.getElementById('startBtn').onclick = stopCamera;
+        
+        // Initialize reconstructed image
+        reconstructedImage = compressedCtx.createImageData(320, 240);
+        
+        requestAnimationFrame(processFrame);
+      } catch (err) {
+        console.error('Error:', err);
+      }
+    }
+
+    function stopCamera() {
+      isRunning = false;
+      if (video && video.srcObject) {
+        video.srcObject.getTracks().forEach(track => track.stop());
+      }
+      document.getElementById('startBtn').textContent = 'Start Camera';
+      document.getElementById('startBtn').onclick = startCamera;
+    }
+
+    function toggleEventMode() {
+      eventMode = !eventMode;
+      document.getElementById('eventBtn').textContent = `Event Mode: ${eventMode ? 'ON' : 'OFF'}`;
+      document.getElementById('eventBtn').classList.toggle('active', eventMode);
+      if (!eventMode) {
+        lastQuadtree = null; // Force full frame update
+        previousFrame = null;
+      }
+    }
+
+    function toggleQuadtree() {
+      showQuadtree = !showQuadtree;
+      document.getElementById('showQuadtreeBtn').textContent = `Show Quadtree: ${showQuadtree ? 'ON' : 'OFF'}`;
+      document.getElementById('showQuadtreeBtn').classList.toggle('active', showQuadtree);
+    }
+
+    function processFrame() {
+      if (!isRunning) return;
+
+      // Draw original
+      originalCtx.drawImage(video, 0, 0, 320, 240);
+      const originalData = originalCtx.getImageData(0, 0, 320, 240);
+      
+      // Calculate FPS
+      frameCount++;
+      const now = performance.now();
+      if (now - lastTime > 1000) {
+        document.getElementById('fps').textContent = Math.round(frameCount * 1000 / (now - lastTime));
+        frameCount = 0;
+        lastTime = now;
+      }
+
+      // Calculate raw frame size
+      const rawSize = 320 * 240 * 3;
+      document.getElementById('rawSize').textContent = (rawSize / 1024).toFixed(1) + ' KB';
+
+      // Process with quadtree
+      processQuadtree(originalData);
+
+      requestAnimationFrame(processFrame);
+    }
+
+    function processQuadtree(imageData) {
+      // Build quadtree for the actual image area
+      const quadNodes = [];
+      const initialBlockSize = 16; // 320/16=20, 240/16=15 - perfect division!
+      
+      // In event mode, only rebuild quadtree for areas that changed significantly
+      if (eventMode && lastQuadtree && previousFrame) {
+        // Quick scan for changed regions
+        const changedRegions = detectChangedRegions(imageData, previousFrame);
+        
+        // Reuse previous quadtree for unchanged regions
+        for (let y = 0; y <= 240 - initialBlockSize; y += initialBlockSize) {
+          for (let x = 0; x <= 320 - initialBlockSize; x += initialBlockSize) {
+            const regionKey = `${x},${y}`;
+            if (changedRegions.has(regionKey)) {
+              // Rebuild this region
+              const node = new QuadNode(x, y, initialBlockSize);
+              buildQuadtree(node, imageData);
+              quadNodes.push(node);
+            } else {
+              // Reuse previous quadtree for this region
+              const prevNode = findPreviousNode(x, y, lastQuadtree);
+              if (prevNode) {
+                quadNodes.push(prevNode);
+              } else {
+                const node = new QuadNode(x, y, initialBlockSize);
+                buildQuadtree(node, imageData);
+                quadNodes.push(node);
+              }
+            }
+          }
+        }
+      } else {
+        // Full rebuild
+        for (let y = 0; y <= 240 - initialBlockSize; y += initialBlockSize) {
+          for (let x = 0; x <= 320 - initialBlockSize; x += initialBlockSize) {
+            const node = new QuadNode(x, y, initialBlockSize);
+            buildQuadtree(node, imageData);
+            quadNodes.push(node);
+          }
+        }
+      }
+      
+      // Collect all leaf nodes
+      const leafNodes = [];
+      const stats = { 
+        totalNodes: 0, 
+        bySize: { 64: 0, 32: 0, 16: 0, 8: 0, 4: 0, 2: 0 },
+        lowPass: 0, midPass: 0, highPass: 0,
+        maxDepth: 0
+      };
+      
+      quadNodes.forEach(node => collectLeafNodes(node, leafNodes, stats));
+      
+      // Detect changes for event mode
+      let changedNodes = [];
+      if (eventMode && lastQuadtree && previousFrame) {
+        changedNodes = detectChangedNodes(leafNodes, imageData);
+        // Much higher limit - we want to see all changes
+        if (changedNodes.length > 500) {
+          // Sort by size (prioritize larger blocks) and take top 500
+          changedNodes.sort((a, b) => b.size - a.size);
+          changedNodes = changedNodes.slice(0, 500);
+        }
+      } else {
+        changedNodes = leafNodes; // Send all nodes on first frame
+      }
+      
+      // Serialize and compress
+      const serialized = serializeNodes(changedNodes);
+      
+      // Deserialize and reconstruct
+      if (!eventMode || !lastQuadtree) {
+        // Full frame reconstruction
+        reconstructFromNodes(leafNodes, imageData);
+      } else {
+        // Incremental update - only update changed nodes
+        updateReconstructedImage(changedNodes, imageData);
+      }
+      
+      // Draw quadtree visualization
+      if (showQuadtree) {
+        quadtreeCtx.fillStyle = '#000';
+        quadtreeCtx.fillRect(0, 0, 320, 240);
+        quadNodes.forEach(node => drawNode(node));
+        
+        // Highlight changed nodes in event mode
+        if (eventMode && changedNodes.length > 0) {
+          quadtreeCtx.strokeStyle = '#ff0';
+          quadtreeCtx.lineWidth = 2;
+          changedNodes.forEach(node => {
+            quadtreeCtx.strokeRect(node.x, node.y, node.size, node.size);
+          });
+        }
+      } else {
+        // Copy compressed image to quadtree canvas
+        quadtreeCtx.drawImage(compressedCanvas, 0, 0);
+      }
+      
+      // Update stats (pass original imageData to avoid another getImageData call)
+      updateStats(stats, leafNodes.length, changedNodes.length, serialized.size, imageData);
+      
+      // Store for next frame
+      lastQuadtree = leafNodes;
+      previousFrame = new Uint8ClampedArray(imageData.data);
+    }
+
+    function buildQuadtree(node, imageData) {
+      // Calculate variance for this block
+      const blockData = extractBlockData(imageData, node.x, node.y, node.size);
+      node.color = calculateAverageColor(blockData);
+      node.variance = calculateVariance(blockData, node.color);
+      
+      // Check if this block is likely inside a face region
+      const isLikelyFaceRegion = detectFaceRegion(imageData, node.x, node.y, node.size);
+      
+      // Decide whether to subdivide based on variance and quality
+      // Higher quality = lower threshold = more subdivision
+      let varianceThreshold = (1 - quality) * 10000 + 100; // More sensitive at high quality
+      
+      // If likely face region, be more aggressive about subdivision
+      if (isLikelyFaceRegion) {
+        varianceThreshold *= 0.3; // Much lower threshold for face regions
+      }
+      
+      // Higher quality = smaller minimum block size
+      let minSize = quality > 0.99 ? 2 :    // Ultra high quality: 2x2 blocks
+                    quality > 0.95 ? 4 :    // Very high quality: 4x4 blocks  
+                    quality > 0.8 ? 8 :     // High quality: 8x8 blocks
+                    quality > 0.6 ? 16 :    // Medium quality: 16x16 blocks
+                    32;                     // Low quality: 32x32 minimum
+      
+      // Force smaller blocks in face regions
+      if (isLikelyFaceRegion && minSize > 8) {
+        minSize = 8; // Don't allow blocks larger than 8x8 in face regions
+      }
+      
+      if (node.variance > varianceThreshold && node.size > minSize) {
+        node.subdivide();
+        if (node.children) {
+          node.children.forEach(child => buildQuadtree(child, imageData));
+        }
+      }
+    }
+
+    function detectChangedRegions(currentData, previousData) {
+      // Fast scan to detect which 16x16 regions have changed
+      const changedRegions = new Set();
+      const blockSize = 16;
+      // Much lower threshold for detecting changed regions
+      const threshold = Math.max(50, noiseThreshold * 4);
+      
+      for (let y = 0; y <= 240 - blockSize; y += blockSize) {
+        for (let x = 0; x <= 320 - blockSize; x += blockSize) {
+          let diff = 0;
+          let maxDiff = 0;
+          // Sample pixels in each region
+          for (let sy = 0; sy < blockSize; sy += 2) {
+            for (let sx = 0; sx < blockSize; sx += 2) {
+              const idx = ((y + sy) * 320 + (x + sx)) * 4;
+              const pixelDiff = Math.abs(currentData.data[idx] - previousData[idx]) +
+                                Math.abs(currentData.data[idx + 1] - previousData[idx + 1]) +
+                                Math.abs(currentData.data[idx + 2] - previousData[idx + 2]);
+              diff += pixelDiff;
+              maxDiff = Math.max(maxDiff, pixelDiff);
+            }
+          }
+          
+          // Mark as changed if average diff OR any single pixel changed significantly
+          if (diff > threshold || maxDiff > 30) {
+            changedRegions.add(`${x},${y}`);
+          }
+        }
+      }
+      
+      return changedRegions;
+    }
+    
+    function findPreviousNode(x, y, previousNodes) {
+      // Find the node from previous frame that covers this position
+      for (const node of previousNodes) {
+        if (node.x === x && node.y === y && node.size === 16) {
+          return node;
+        }
+      }
+      return null;
+    }
+
+    function detectFaceRegion(imageData, x, y, size) {
+      // Simple heuristic: face regions typically have:
+      // 1. Skin-tone colors (RGB ratios)
+      // 2. High edge density around them (hair, eyes, mouth)
+      // 3. Located in center-upper portion of frame
+      
+      const blockData = extractBlockData(imageData, x, y, size);
+      if (blockData.length === 0) return false;
+      
+      // Check if in typical face position (center-upper area)
+      const centerX = x + size/2;
+      const centerY = y + size/2;
+      const inFaceZone = centerX > 80 && centerX < 240 && // Horizontal center
+                         centerY > 40 && centerY < 180;     // Upper-middle area
+      
+      if (!inFaceZone) return false;
+      
+      // Check for skin-tone colors
+      const avgColor = calculateAverageColor(blockData);
+      const isSkinTone = avgColor.r > avgColor.b &&  // Red > Blue
+                         avgColor.r > 80 &&            // Minimum red
+                         avgColor.g > 60 &&            // Minimum green
+                         Math.abs(avgColor.r - avgColor.g) < 50; // R and G relatively close
+      
+      // Check edge density in surrounding area (looking for hair/feature boundaries)
+      const surroundingVariance = calculateSurroundingComplexity(imageData, x, y, size);
+      const hasComplexSurroundings = surroundingVariance > 2000;
+      
+      // If it looks like skin in the face zone with complex surroundings, it's likely face
+      return isSkinTone || (inFaceZone && hasComplexSurroundings);
+    }
+    
+    function calculateSurroundingComplexity(imageData, x, y, size) {
+      // Sample blocks around this one to detect if we're surrounded by edges
+      const samples = [];
+      const sampleSize = Math.min(16, size);
+      const width = 320;
+      const height = 240;
+      
+      // Sample 8 directions around the block
+      const offsets = [
+        [-sampleSize, -sampleSize], [0, -sampleSize], [sampleSize, -sampleSize],
+        [-sampleSize, 0],                              [sampleSize, 0],
+        [-sampleSize, sampleSize],  [0, sampleSize],  [sampleSize, sampleSize]
+      ];
+      
+      let totalVariance = 0;
+      let validSamples = 0;
+      
+      offsets.forEach(([dx, dy]) => {
+        const sx = x + dx;
+        const sy = y + dy;
+        if (sx >= 0 && sy >= 0 && sx + sampleSize <= width && sy + sampleSize <= height) {
+          const sampleData = extractBlockData(imageData, sx, sy, sampleSize);
+          const avgColor = calculateAverageColor(sampleData);
+          const variance = calculateVariance(sampleData, avgColor);
+          totalVariance += variance;
+          validSamples++;
+        }
+      });
+      
+      return validSamples > 0 ? totalVariance / validSamples : 0;
+    }
+
+    function extractBlockData(imageData, x, y, size) {
+      const data = [];
+      const width = 320;
+      const height = 240;
+      
+      for (let dy = 0; dy < size && y + dy < height; dy++) {
+        for (let dx = 0; dx < size && x + dx < width; dx++) {
+          const idx = ((y + dy) * width + (x + dx)) * 4;
+          data.push({
+            r: imageData.data[idx],
+            g: imageData.data[idx + 1],
+            b: imageData.data[idx + 2]
+          });
+        }
+      }
+      
+      return data;
+    }
+
+    function calculateAverageColor(blockData) {
+      if (blockData.length === 0) return { r: 0, g: 0, b: 0 };
+      
+      const sum = blockData.reduce((acc, pixel) => ({
+        r: acc.r + pixel.r,
+        g: acc.g + pixel.g,
+        b: acc.b + pixel.b
+      }), { r: 0, g: 0, b: 0 });
+      
+      return {
+        r: Math.round(sum.r / blockData.length),
+        g: Math.round(sum.g / blockData.length),
+        b: Math.round(sum.b / blockData.length)
+      };
+    }
+
+    function calculateVariance(blockData, avgColor) {
+      if (blockData.length === 0) return 0;
+      
+      const variance = blockData.reduce((acc, pixel) => {
+        const dr = pixel.r - avgColor.r;
+        const dg = pixel.g - avgColor.g;
+        const db = pixel.b - avgColor.b;
+        return acc + (dr * dr + dg * dg + db * db);
+      }, 0);
+      
+      return variance / blockData.length;
+    }
+
+    function collectLeafNodes(node, leafNodes, stats) {
+      stats.totalNodes++;
+      stats.maxDepth = Math.max(stats.maxDepth, node.depth);
+      
+      if (node.isLeaf) {
+        leafNodes.push(node);
+        
+        // Count by size
+        if (node.size >= 64) stats.bySize[64]++;
+        else if (node.size >= 32) stats.bySize[32]++;
+        else if (node.size >= 16) stats.bySize[16]++;
+        else if (node.size >= 8) stats.bySize[8]++;
+        else if (node.size >= 4) stats.bySize[4]++;
+        else stats.bySize[2]++;
+        
+        // Classify as low/mid/high frequency
+        if (node.size >= 32) stats.lowPass++;
+        else if (node.size >= 16) stats.midPass++;
+        else stats.highPass++;
+      } else if (node.children) {
+        node.children.forEach(child => collectLeafNodes(child, leafNodes, stats));
+      }
+    }
+
+    function detectChangedNodes(nodes, currentFrame) {
+      const changed = [];
+      
+      nodes.forEach(node => {
+        // Compare with previous frame
+        const blockData = extractBlockData(currentFrame, node.x, node.y, node.size);
+        const currentAvg = calculateAverageColor(blockData);
+        
+        // Calculate difference with stored color
+        const dr = Math.abs(currentAvg.r - node.color.r);
+        const dg = Math.abs(currentAvg.g - node.color.g);
+        const db = Math.abs(currentAvg.b - node.color.b);
+        const totalDiff = dr + dg + db;
+        
+        // Much more sensitive thresholds
+        // Larger blocks should be MORE sensitive since they cover more area
+        const sizeMultiplier = node.size >= 32 ? 0.3 :   // Very sensitive for large blocks
+                               node.size >= 16 ? 0.5 :   // Sensitive for medium blocks
+                               node.size >= 8 ? 0.7 :     // Normal for small blocks
+                               1.0;                       // Less sensitive for tiny blocks
+        
+        // Lower base threshold for more sensitivity
+        const threshold = Math.max(3, noiseThreshold * 0.5) * sizeMultiplier;
+        
+        if (totalDiff > threshold) {
+          node.color = currentAvg;
+          node.changed = true;
+          changed.push(node);
+        } else {
+          node.changed = false;
+        }
+      });
+      
+      return changed;
+    }
+
+    function serializeNodes(nodes) {
+      // Simplified serialization
+      const data = nodes.map(node => ({
+        x: node.x,
+        y: node.y,
+        s: node.size,
+        c: [node.color.r, node.color.g, node.color.b]
+      }));
+      
+      // Calculate approximate size
+      const bytesPerNode = 7; // x,y (2), size (1), rgb (3), overhead (1)
+      const size = nodes.length * bytesPerNode;
+      
+      return { data, size };
+    }
+
+    function reconstructFromNodes(nodes, imageData) {
+      // Ensure reconstructedImage exists
+      if (!reconstructedImage) {
+        reconstructedImage = compressedCtx.createImageData(320, 240);
+      }
+      
+      // Clear reconstruction
+      for (let i = 0; i < reconstructedImage.data.length; i += 4) {
+        reconstructedImage.data[i] = 0;
+        reconstructedImage.data[i + 1] = 0;
+        reconstructedImage.data[i + 2] = 0;
+        reconstructedImage.data[i + 3] = 255;
+      }
+      
+      // Draw each node
+      nodes.forEach(node => {
+        if (node.color) {
+          drawNodeToImage(node, reconstructedImage);
+        }
+      });
+      
+      // Apply adaptive TAA (Temporal Anti-Aliasing) based on block size
+      if (taaBlend > 0 && previousReconstructed) {
+        // Blend current frame with previous frame, adaptive per pixel
+        for (let i = 0; i < reconstructedImage.data.length; i += 4) {
+          // Calculate adaptive TAA based on block size (stored in alpha)
+          // Alpha: 255 = small block (no TAA), 128 = large block (max TAA)
+          const blockSizeCode = reconstructedImage.data[i + 3];
+          const adaptiveTAA = taaBlend * (255 - blockSizeCode) / 127; // Scale TAA by block size
+          
+          // Apply adaptive blending
+          reconstructedImage.data[i] = reconstructedImage.data[i] * (1 - adaptiveTAA) + previousReconstructed.data[i] * adaptiveTAA;
+          reconstructedImage.data[i + 1] = reconstructedImage.data[i + 1] * (1 - adaptiveTAA) + previousReconstructed.data[i + 1] * adaptiveTAA;
+          reconstructedImage.data[i + 2] = reconstructedImage.data[i + 2] * (1 - adaptiveTAA) + previousReconstructed.data[i + 2] * adaptiveTAA;
+        }
+      }
+      
+      // Store for next frame's TAA (but first restore alpha to 255)
+      for (let i = 3; i < reconstructedImage.data.length; i += 4) {
+        reconstructedImage.data[i] = 255; // Restore full opacity
+      }
+      
+      if (!previousReconstructed) {
+        previousReconstructed = compressedCtx.createImageData(320, 240);
+      }
+      previousReconstructed.data.set(reconstructedImage.data);
+      
+      compressedCtx.putImageData(reconstructedImage, 0, 0);
+    }
+
+    function updateReconstructedImage(changedNodes, imageData) {
+      // Ensure reconstructedImage exists
+      if (!reconstructedImage) {
+        reconstructedImage = compressedCtx.createImageData(320, 240);
+        // Fill with dark gray initially
+        for (let i = 0; i < reconstructedImage.data.length; i += 4) {
+          reconstructedImage.data[i] = 32;
+          reconstructedImage.data[i + 1] = 32;
+          reconstructedImage.data[i + 2] = 32;
+          reconstructedImage.data[i + 3] = 255;
+        }
+      }
+      
+      
+      // Only update changed nodes
+      changedNodes.forEach(node => {
+        if (node.color) {
+          drawNodeToImage(node, reconstructedImage);
+        }
+      });
+      
+      // Apply adaptive TAA (Temporal Anti-Aliasing) based on block size
+      if (taaBlend > 0 && previousReconstructed) {
+        // Blend current frame with previous frame, adaptive per pixel
+        for (let i = 0; i < reconstructedImage.data.length; i += 4) {
+          // Calculate adaptive TAA based on block size (stored in alpha)
+          // Alpha: 255 = small block (no TAA), 128 = large block (max TAA)
+          const blockSizeCode = reconstructedImage.data[i + 3];
+          const adaptiveTAA = taaBlend * (255 - blockSizeCode) / 127; // Scale TAA by block size
+          
+          // Apply adaptive blending
+          reconstructedImage.data[i] = reconstructedImage.data[i] * (1 - adaptiveTAA) + previousReconstructed.data[i] * adaptiveTAA;
+          reconstructedImage.data[i + 1] = reconstructedImage.data[i + 1] * (1 - adaptiveTAA) + previousReconstructed.data[i + 1] * adaptiveTAA;
+          reconstructedImage.data[i + 2] = reconstructedImage.data[i + 2] * (1 - adaptiveTAA) + previousReconstructed.data[i + 2] * adaptiveTAA;
+        }
+      }
+      
+      // Store for next frame's TAA (but first restore alpha to 255)
+      for (let i = 3; i < reconstructedImage.data.length; i += 4) {
+        reconstructedImage.data[i] = 255; // Restore full opacity
+      }
+      
+      if (!previousReconstructed) {
+        previousReconstructed = compressedCtx.createImageData(320, 240);
+      }
+      previousReconstructed.data.set(reconstructedImage.data);
+      
+      compressedCtx.putImageData(reconstructedImage, 0, 0);
+    }
+
+    function drawNodeToImage(node, targetImage) {
+      const width = 320;
+      const height = 240;
+      
+      // Validate node has required properties
+      if (!node.color || node.x === undefined || node.y === undefined || !node.size) {
+        return;
+      }
+      
+      // Store block size info in alpha channel for adaptive TAA
+      // We'll use alpha to encode block size: 255 = small block, 128 = large block
+      const sizeCode = node.size <= 4 ? 255 :    // No TAA for tiny blocks (mouth, eyes)
+                       node.size <= 8 ? 230 :     // Minimal TAA for small blocks
+                       node.size <= 16 ? 200 :    // Some TAA for medium blocks
+                       node.size <= 32 ? 170 :    // More TAA for large blocks
+                       128;                        // Max TAA for huge blocks (background)
+      
+      for (let dy = 0; dy < node.size && node.y + dy < height; dy++) {
+        for (let dx = 0; dx < node.size && node.x + dx < width; dx++) {
+          const idx = ((node.y + dy) * width + (node.x + dx)) * 4;
+          if (idx >= 0 && idx < targetImage.data.length - 3) {
+            targetImage.data[idx] = node.color.r;
+            targetImage.data[idx + 1] = node.color.g;
+            targetImage.data[idx + 2] = node.color.b;
+            targetImage.data[idx + 3] = sizeCode; // Store size info for adaptive TAA
+          }
+        }
+      }
+    }
+
+
+    function drawNode(node) {
+      if (node.isLeaf) {
+        // Draw filled rectangle with color
+        quadtreeCtx.fillStyle = `rgb(${node.color.r}, ${node.color.g}, ${node.color.b})`;
+        quadtreeCtx.fillRect(node.x, node.y, node.size, node.size);
+        
+        // Draw border
+        const borderColor = node.size >= 32 ? '#10b981' : node.size >= 16 ? '#fbbf24' : '#ef4444';
+        quadtreeCtx.strokeStyle = borderColor;
+        quadtreeCtx.lineWidth = node.changed ? 2 : 0.5;
+        quadtreeCtx.strokeRect(node.x, node.y, node.size, node.size);
+      } else if (node.children) {
+        node.children.forEach(child => drawNode(child));
+      }
+    }
+
+    function updateStats(stats, totalLeaves, changedCount, dataSize, originalData) {
+      document.getElementById('totalNodes').textContent = stats.totalNodes;
+      document.getElementById('leafNodes').textContent = totalLeaves;
+      document.getElementById('changedNodes').textContent = changedCount;
+      document.getElementById('dataSize').textContent = (dataSize / 1024).toFixed(2) + ' KB';
+      
+      const rawSize = 320 * 240 * 3;
+      document.getElementById('compression').textContent = Math.round(rawSize / dataSize) + 'x';
+      
+      // Update layer counts
+      document.getElementById('lowPassCount').textContent = stats.lowPass;
+      document.getElementById('midPassCount').textContent = stats.midPass;
+      document.getElementById('highPassCount').textContent = stats.highPass;
+      
+      // Update block size counts
+      document.getElementById('maxDepth').textContent = stats.maxDepth;
+      document.getElementById('largeBlocks').textContent = stats.bySize[64];
+      document.getElementById('mediumBlocks').textContent = stats.bySize[32];
+      document.getElementById('smallBlocks').textContent = stats.bySize[16];
+      document.getElementById('tinyBlocks').textContent = stats.bySize[8];
+      document.getElementById('microBlocks').textContent = stats.bySize[4];
+      
+      // Calculate PSNR (use passed originalData, avoid getImageData!)
+      let mse = 0;
+      for (let i = 0; i < originalData.data.length; i += 4) {
+        const dr = reconstructedImage.data[i] - originalData.data[i];
+        const dg = reconstructedImage.data[i+1] - originalData.data[i+1];
+        const db = reconstructedImage.data[i+2] - originalData.data[i+2];
+        mse += (dr*dr + dg*dg + db*db) / 3;
+      }
+      mse /= (320 * 240);
+      const psnr = mse > 0 ? 20 * Math.log10(255 / Math.sqrt(mse)) : 100;
+      document.getElementById('psnr').textContent = psnr.toFixed(1) + ' dB';
+      
+      // Update bandwidth
+      const bandwidth = dataSize * 30 / 1024; // KB/s at 30fps
+      document.getElementById('bandwidthText').textContent = bandwidth.toFixed(1) + ' KB/s';
+      document.getElementById('bandwidth').style.width = Math.min(100, bandwidth / 50) + '%';
+    }
+  </script>
+</body>
+</html>
