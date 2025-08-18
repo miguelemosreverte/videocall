@@ -275,6 +275,9 @@
     // Priority system variables
     let maxBandwidthKBps = 100; // Default 100 KB/s (0.1 MB/s) bandwidth limit
     let eventBudget = Math.floor((100 * 1024) / (30 * 100)); // ~34 events at 100KB/s
+    
+    // Track quad positions for motion vector detection
+    let previousQuadMap = new Map(); // Key: "x,y,size" -> quad data
 
     // Canvas contexts
     const currentCanvas = document.getElementById('currentCanvas');
@@ -1080,6 +1083,89 @@
       return corrections;
     }
     
+    // Detect if a quad has moved from a previous position
+    function detectQuadMotion(events, currentImageData) {
+      const enhancedEvents = [];
+      const currentQuadMap = new Map();
+      
+      events.forEach(event => {
+        // Extract current quad pixels
+        const quadPixels = extractQuadPixels(currentImageData, event.x, event.y, event.size);
+        const quadHash = hashQuadPixels(quadPixels);
+        
+        // Store current quad for next frame
+        const quadKey = `${event.x},${event.y},${event.size}`;
+        currentQuadMap.set(quadKey, { pixels: quadPixels, hash: quadHash });
+        
+        // Look for this quad in previous frame at different positions
+        let foundMotion = false;
+        if (previousQuadMap.size > 0) {
+          // Search nearby positions for matching quad
+          const searchRange = 16; // Search within 16 pixels
+          for (let dy = -searchRange; dy <= searchRange && !foundMotion; dy += 4) {
+            for (let dx = -searchRange; dx <= searchRange && !foundMotion; dx += 4) {
+              const prevX = event.x - dx;
+              const prevY = event.y - dy;
+              const prevKey = `${prevX},${prevY},${event.size}`;
+              
+              const prevQuad = previousQuadMap.get(prevKey);
+              if (prevQuad && prevQuad.hash === quadHash) {
+                // Found matching quad at different position!
+                enhancedEvents.push({
+                  ...event,
+                  isMotionVector: true,
+                  sourceX: prevX,
+                  sourceY: prevY,
+                  deltaX: dx,
+                  deltaY: dy
+                });
+                foundMotion = true;
+              }
+            }
+          }
+        }
+        
+        if (!foundMotion) {
+          // No motion detected, send as pixel update
+          enhancedEvents.push({
+            ...event,
+            isMotionVector: false,
+            pixels: quadPixels
+          });
+        }
+      });
+      
+      // Update previous quad map for next frame
+      previousQuadMap = currentQuadMap;
+      
+      return enhancedEvents;
+    }
+    
+    // Extract pixels from a quad
+    function extractQuadPixels(imageData, x, y, size) {
+      const pixels = [];
+      for (let dy = 0; dy < size; dy++) {
+        for (let dx = 0; dx < size; dx++) {
+          const idx = ((y + dy) * videoWidth + (x + dx)) * 4;
+          pixels.push(imageData.data[idx]);     // R
+          pixels.push(imageData.data[idx + 1]); // G
+          pixels.push(imageData.data[idx + 2]); // B
+        }
+      }
+      return pixels;
+    }
+    
+    // Create a simple hash of quad pixels for comparison
+    function hashQuadPixels(pixels) {
+      // Simple hash: sample every 4th pixel and combine
+      let hash = 0;
+      for (let i = 0; i < pixels.length; i += 12) { // Sample every 4th pixel (3 bytes * 4)
+        hash = ((hash << 5) - hash) + pixels[i] + pixels[i+1] + pixels[i+2];
+        hash = hash & 0xFFFFFF; // Keep it 24-bit
+      }
+      return hash;
+    }
+    
     // Adaptive quadtree merging of motion vectors
     function mergeAdaptiveBlocks(motionData, blocksX, blocksY) {
       if (!adaptiveMode) {
@@ -1263,9 +1349,12 @@
       // Get motion events from GPU
       let events = mergeAdaptiveBlocks(motionData, blocksX, blocksY);
       
+      // Detect quad motion BEFORE feedback loop
+      const currentImageData = currentCtx.getImageData(0, 0, videoWidth, videoHeight);
+      events = detectQuadMotion(events, currentImageData);
+      
       // FEEDBACK LOOP: Compare sender reference with actual current frame
       if (senderReferenceFrame) {
-        const currentImageData = currentCtx.getImageData(0, 0, videoWidth, videoHeight);
         const corrections = computeCorrectionEvents(currentImageData, senderReferenceFrame, blockSize);
         
         // Merge corrections with motion events, avoiding duplicates
@@ -1306,10 +1395,24 @@
       let maxMotion = 0;
       let blockStats = { 4: 0, 8: 0, 16: 0 };
       let correctionCount = events.filter(e => e.isCorrection).length;
+      let motionVectorCount = events.filter(e => e.isMotionVector).length;
 
       // Draw motion vectors for merged blocks
       events.forEach(event => {
-        const magnitude = Math.sqrt(event.mvX * event.mvX + event.mvY * event.mvY);
+        let magnitude, vectorX, vectorY;
+        
+        if (event.isMotionVector) {
+          // For true motion vectors, use the delta
+          magnitude = Math.sqrt(event.deltaX * event.deltaX + event.deltaY * event.deltaY);
+          vectorX = event.deltaX;
+          vectorY = event.deltaY;
+        } else {
+          // For regular events, use mvX/mvY from GPU
+          magnitude = Math.sqrt(event.mvX * event.mvX + event.mvY * event.mvY);
+          vectorX = event.mvX;
+          vectorY = event.mvY;
+        }
+        
         totalMotion += magnitude;
         maxMotion = Math.max(maxMotion, magnitude);
         
@@ -1320,26 +1423,32 @@
         const centerY = event.y + event.size / 2;
 
         if (showVectors && magnitude > 0.1) {
-          // Draw motion vector arrow
-          motionCtx.strokeStyle = `hsl(${120 - magnitude * 10}, 100%, 50%)`;
-          motionCtx.lineWidth = Math.max(1, magnitude / 4);
+          // Draw motion vector arrow - blue for true motion vectors, colored by magnitude for others
+          if (event.isMotionVector) {
+            motionCtx.strokeStyle = 'rgba(100, 150, 255, 0.9)'; // Blue for motion vectors
+            motionCtx.lineWidth = 2;
+          } else {
+            motionCtx.strokeStyle = `hsl(${120 - magnitude * 10}, 100%, 50%)`;
+            motionCtx.lineWidth = Math.max(1, magnitude / 4);
+          }
+          
           motionCtx.beginPath();
           motionCtx.moveTo(centerX, centerY);
-          motionCtx.lineTo(centerX + event.mvX * 2, centerY + event.mvY * 2);
+          motionCtx.lineTo(centerX + vectorX * 2, centerY + vectorY * 2);
           motionCtx.stroke();
 
           // Draw arrowhead
-          const angle = Math.atan2(event.mvY, event.mvX);
+          const angle = Math.atan2(vectorY, vectorX);
           motionCtx.fillStyle = motionCtx.strokeStyle;
           motionCtx.beginPath();
-          motionCtx.moveTo(centerX + event.mvX * 2, centerY + event.mvY * 2);
+          motionCtx.moveTo(centerX + vectorX * 2, centerY + vectorY * 2);
           motionCtx.lineTo(
-            centerX + event.mvX * 2 - 5 * Math.cos(angle - Math.PI / 6),
-            centerY + event.mvY * 2 - 5 * Math.sin(angle - Math.PI / 6)
+            centerX + vectorX * 2 - 5 * Math.cos(angle - Math.PI / 6),
+            centerY + vectorY * 2 - 5 * Math.sin(angle - Math.PI / 6)
           );
           motionCtx.lineTo(
-            centerX + event.mvX * 2 - 5 * Math.cos(angle + Math.PI / 6),
-            centerY + event.mvY * 2 - 5 * Math.sin(angle + Math.PI / 6)
+            centerX + vectorX * 2 - 5 * Math.cos(angle + Math.PI / 6),
+            centerY + vectorY * 2 - 5 * Math.sin(angle + Math.PI / 6)
           );
           motionCtx.closePath();
           motionCtx.fill();
@@ -1359,7 +1468,8 @@
       // Update stats
       const highPriorityBlocks = events.filter(e => e.errorMagnitude > 1000).length;
       const totalError = events.reduce((sum, e) => sum + (e.errorMagnitude || 0), 0);
-      const blockInfo = `${motionCount}/${eventBudget} (err: ${Math.round(totalError)})`;
+      const mvInfo = motionVectorCount > 0 ? ` MV:${motionVectorCount}` : '';
+      const blockInfo = `${motionCount}/${eventBudget}${mvInfo}`;
       document.getElementById('motionBlocks').textContent = blockInfo;
       document.getElementById('avgMotion').textContent = motionCount > 0 ? 
         (totalMotion / motionCount).toFixed(1) + ' px' : '0.0 px';
@@ -1379,16 +1489,21 @@
       // Calculate ACTUAL data size that would be transmitted
       let dataSize = 0;
       events.forEach(event => {
-        // Metadata: position (2 bytes x,y), motion (2 bytes mvX,mvY), size (1 byte)
-        dataSize += 5;
-        
-        // Actual pixel data for the block
-        // In a real system, this would be compressed (JPEG/WebP), but for accurate calculation:
-        // Each pixel needs RGB (3 bytes), but with JPEG compression at 70% quality, roughly 1/10th
-        const pixelCount = event.size * event.size;
-        const rawBlockSize = pixelCount * 3; // RGB bytes
-        const compressedBlockSize = Math.ceil(rawBlockSize / 10); // JPEG compression estimate
-        dataSize += compressedBlockSize;
+        if (event.isMotionVector) {
+          // Motion vector: position (2 bytes), delta (2 bytes), size (1 byte) = 5 bytes
+          // Plus 1 byte for event type = 6 bytes total
+          // Let's round to 8 bytes for alignment
+          dataSize += 8;
+        } else {
+          // Pixel update: metadata + compressed pixels
+          dataSize += 5; // Metadata
+          
+          // Actual pixel data for the block
+          const pixelCount = event.size * event.size;
+          const rawBlockSize = pixelCount * 3; // RGB bytes
+          const compressedBlockSize = Math.ceil(rawBlockSize / 10); // JPEG compression estimate
+          dataSize += compressedBlockSize;
+        }
       });
       
       // Convert to KB
@@ -1449,13 +1564,34 @@
       
       // Apply motion compensation: update blocks that changed or moved
       events.forEach(event => {
-        const currentX = event.x;
-        const currentY = event.y;
-        
-        // Always update the block from the current frame
-        // This handles both motion and appearance changes
-        const blockData = currentCtx.getImageData(currentX, currentY, event.size, event.size);
-        outputCtx.putImageData(blockData, currentX, currentY);
+        if (event.isMotionVector) {
+          // Motion vector: copy quad from its source position in accumulated frame
+          const blockData = outputCtx.createImageData(event.size, event.size);
+          
+          // Copy from source position (where the quad came from)
+          for (let dy = 0; dy < event.size; dy++) {
+            for (let dx = 0; dx < event.size; dx++) {
+              const srcX = event.sourceX + dx;
+              const srcY = event.sourceY + dy;
+              const dstIdx = (dy * event.size + dx) * 4;
+              const srcIdx = (srcY * videoWidth + srcX) * 4;
+              
+              if (srcX >= 0 && srcX < videoWidth && srcY >= 0 && srcY < videoHeight) {
+                blockData.data[dstIdx] = accumulatedFrame.data[srcIdx];
+                blockData.data[dstIdx + 1] = accumulatedFrame.data[srcIdx + 1];
+                blockData.data[dstIdx + 2] = accumulatedFrame.data[srcIdx + 2];
+                blockData.data[dstIdx + 3] = 255;
+              }
+            }
+          }
+          
+          // Put at destination position
+          outputCtx.putImageData(blockData, event.x, event.y);
+        } else {
+          // Regular pixel update: get block from current frame
+          const blockData = currentCtx.getImageData(event.x, event.y, event.size, event.size);
+          outputCtx.putImageData(blockData, event.x, event.y);
+        }
       });
       
       // Save the current output as the new accumulated frame
