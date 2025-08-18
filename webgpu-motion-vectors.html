@@ -820,7 +820,7 @@
         device.queue.writeTexture(
           { texture: currentTexture },
           currentFrame.data,
-          { bytesPerRow: 320 * 4 },
+          { bytesPerRow: videoWidth * 4 },
           textureSize
         );
 
@@ -833,7 +833,7 @@
         device.queue.writeTexture(
           { texture: previousTexture },
           previousFrame.data,
-          { bytesPerRow: 320 * 4 },
+          { bytesPerRow: videoWidth * 4 },
           textureSize
         );
 
