@@ -571,8 +571,14 @@
               
               console.log('Sending keyframe:', canvas.width, 'x', canvas.height);
             } else {
-              // Send events
+              // Send events only if there are changes
               const limitedEvents = events.slice(0, 50);
+              
+              // Skip sending if no events (no changes detected)
+              if (limitedEvents.length === 0) {
+                isCapturing = false;
+                return; // Don't send empty frames
+              }
               
               // Calculate data size
               limitedEvents.forEach(event => {
@@ -813,7 +819,7 @@
         
         // Handle keyframe or event-based encoding
         if (frame.k) {
-          console.log('Received keyframe from', peerId);
+          console.log('Received keyframe from', senderId);
           
           // Initialize reconstruction canvas for this peer
           if (!img.reconstructionCanvas) {
@@ -838,7 +844,7 @@
           
         } else if (frame.e) {
           // Event-based update
-          console.log('Received', frame.e.length, 'events from', peerId);
+          console.log('Received', frame.e.length, 'events from', senderId);
           
           // Initialize canvas if needed (in case we missed the keyframe)
           if (!img.reconstructionCanvas) {
