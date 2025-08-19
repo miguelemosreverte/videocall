@@ -464,6 +464,8 @@
       let accumulatedFrame = null;
       const blockSize = 8; // 8x8 blocks for good balance
       const threshold = 20;
+      let framesSinceKeyframe = 0;
+      const keyframeInterval = 150; // Send keyframe every 5 seconds at 30fps
       
       // Track quad positions for motion vectors
       let previousQuadMap = new Map();
@@ -492,7 +494,13 @@
             const events = [];
             let isKeyframe = false;
             
-            if (previousFrame) {
+            // Force keyframe periodically or on first frame
+            framesSinceKeyframe++;
+            if (!previousFrame || framesSinceKeyframe >= keyframeInterval) {
+              isKeyframe = true;
+              framesSinceKeyframe = 0;
+              console.log('Forcing keyframe at frame', framesSinceKeyframe);
+            } else if (previousFrame) {
               // Detect which blocks changed
               const blocksX = Math.ceil(canvas.width / blockSize);
               const blocksY = Math.ceil(canvas.height / blockSize);
@@ -537,10 +545,6 @@
                   }
                 }
               }
-            } else {
-              // First frame - send as keyframe
-              isKeyframe = true;
-              accumulatedFrame = currentImageData;
             }
             
             // Store current frame for next comparison
@@ -552,7 +556,7 @@
             
             if (isKeyframe) {
               // Send full frame as JPEG for keyframe
-              const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+              const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
               const base64Data = dataUrl.split(',')[1];
               dataSize = base64Data.length * 0.75; // Base64 to bytes
               
@@ -564,6 +568,8 @@
                 h: canvas.height,
                 t: Date.now()
               };
+              
+              console.log('Sending keyframe:', canvas.width, 'x', canvas.height);
             } else {
               // Send events
               const limitedEvents = events.slice(0, 50);
@@ -579,8 +585,12 @@
               frame = {
                 s: frameNumber++,
                 e: limitedEvents,
+                w: canvas.width,
+                h: canvas.height,
                 t: Date.now()
               };
+              
+              console.log('Sending', limitedEvents.length, 'block events');
               
               // Update stats
               updateCompressionStats(limitedEvents.length, dataSize);
@@ -803,8 +813,7 @@
         
         // Handle keyframe or event-based encoding
         if (frame.k) {
-          // Keyframe - full image
-          img.src = `data:image/jpeg;base64,${data}`;
+          console.log('Received keyframe from', peerId);
           
           // Initialize reconstruction canvas for this peer
           if (!img.reconstructionCanvas) {
@@ -812,45 +821,78 @@
             img.reconstructionCanvas.width = frame.w || 640;
             img.reconstructionCanvas.height = frame.h || 480;
             img.reconstructionCtx = img.reconstructionCanvas.getContext('2d');
+            console.log('Created reconstruction canvas:', img.reconstructionCanvas.width, 'x', img.reconstructionCanvas.height);
           }
           
-          // Store keyframe in reconstruction canvas
+          // Store keyframe in reconstruction canvas AND display it
           const keyframeImg = new Image();
           keyframeImg.onload = () => {
+            img.reconstructionCtx.clearRect(0, 0, img.reconstructionCanvas.width, img.reconstructionCanvas.height);
             img.reconstructionCtx.drawImage(keyframeImg, 0, 0);
             img.lastFrameData = img.reconstructionCtx.getImageData(0, 0, img.reconstructionCanvas.width, img.reconstructionCanvas.height);
+            // IMPORTANT: Also update the displayed image
+            img.src = `data:image/jpeg;base64,${data}`;
+            console.log('Keyframe applied and displayed');
           };
           keyframeImg.src = `data:image/jpeg;base64,${data}`;
           
-        } else if (frame.e && img.reconstructionCanvas && img.lastFrameData) {
+        } else if (frame.e) {
           // Event-based update
-          // Start with last frame
-          img.reconstructionCtx.putImageData(img.lastFrameData, 0, 0);
+          console.log('Received', frame.e.length, 'events from', peerId);
           
-          // Apply each event (block update)
-          let loadedCount = 0;
-          const totalEvents = frame.e.length;
-          
-          frame.e.forEach((event, index) => {
-            if (event.d) {
-              const blockImg = new Image();
-              blockImg.onload = () => {
-                img.reconstructionCtx.drawImage(blockImg, event.x, event.y, event.s, event.s);
-                loadedCount++;
-                
-                // When all blocks are loaded, update the display
-                if (loadedCount === totalEvents) {
-                  img.lastFrameData = img.reconstructionCtx.getImageData(0, 0, img.reconstructionCanvas.width, img.reconstructionCanvas.height);
-                  img.src = img.reconstructionCanvas.toDataURL('image/jpeg', 0.9);
-                }
-              };
-              blockImg.src = `data:image/jpeg;base64,${event.d}`;
+          // Initialize canvas if needed (in case we missed the keyframe)
+          if (!img.reconstructionCanvas) {
+            img.reconstructionCanvas = document.createElement('canvas');
+            img.reconstructionCanvas.width = frame.w || 640;
+            img.reconstructionCanvas.height = frame.h || 480;
+            img.reconstructionCtx = img.reconstructionCanvas.getContext('2d');
+            console.log('Late canvas init for events');
+            
+            // If we don't have a last frame, initialize with black
+            if (!img.lastFrameData) {
+              img.lastFrameData = img.reconstructionCtx.createImageData(img.reconstructionCanvas.width, img.reconstructionCanvas.height);
+              // Fill with gray instead of black for debugging
+              for (let i = 0; i < img.lastFrameData.data.length; i += 4) {
+                img.lastFrameData.data[i] = 50;
+                img.lastFrameData.data[i + 1] = 50;
+                img.lastFrameData.data[i + 2] = 50;
+                img.lastFrameData.data[i + 3] = 255;
+              }
             }
-          });
+          }
           
-          // If no events, just keep showing last frame
-          if (totalEvents === 0) {
-            img.src = img.reconstructionCanvas.toDataURL('image/jpeg', 0.9);
+          if (img.lastFrameData) {
+            // Start with last frame
+            img.reconstructionCtx.putImageData(img.lastFrameData, 0, 0);
+            
+            // Apply each event (block update)
+            let loadedCount = 0;
+            const totalEvents = frame.e.length;
+            
+            if (totalEvents > 0) {
+              frame.e.forEach((event, index) => {
+                if (event.d) {
+                  const blockImg = new Image();
+                  blockImg.onload = () => {
+                    img.reconstructionCtx.drawImage(blockImg, event.x, event.y, event.s, event.s);
+                    loadedCount++;
+                    
+                    // When all blocks are loaded, update the display
+                    if (loadedCount === totalEvents) {
+                      img.lastFrameData = img.reconstructionCtx.getImageData(0, 0, img.reconstructionCanvas.width, img.reconstructionCanvas.height);
+                      img.src = img.reconstructionCanvas.toDataURL('image/jpeg', 0.9);
+                      console.log('Applied all blocks, updated display');
+                    }
+                  };
+                  blockImg.src = `data:image/jpeg;base64,${event.d}`;
+                }
+              });
+            } else {
+              // No events, just refresh display
+              img.src = img.reconstructionCanvas.toDataURL('image/jpeg', 0.9);
+            }
+          } else {
+            console.warn('No lastFrameData available for reconstruction');
           }
         } else {
           // Fallback for old format
