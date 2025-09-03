@@ -143,7 +143,7 @@
         
         <div class="info-box">
             <p>Connecting to conference...</p>
-            <p>Server: <code id="serverDisplay">ws://194.87.103.57:3001/ws</code></p>
+            <p>Server: <code id="serverDisplay"></code></p>
         </div>
         
         <div class="status" id="status">
@@ -197,8 +197,10 @@
 
     <script>
         // Configuration
-        // Note: Server currently only supports ws://, not wss://
-        let WS_URL = localStorage.getItem('wsServerUrl') || 'ws://194.87.103.57:3001/ws';
+        // Auto-detect protocol: use wss:// for HTTPS pages, ws:// for HTTP/local
+        const isSecure = window.location.protocol === 'https:';
+        const defaultUrl = isSecure ? 'wss://194.87.103.57:3001/ws' : 'ws://194.87.103.57:3001/ws';
+        let WS_URL = localStorage.getItem('wsServerUrl') || defaultUrl;
         document.getElementById('serverDisplay').textContent = WS_URL;
         
         // State
@@ -868,19 +870,6 @@
         
         // Auto-join on page load
         window.addEventListener('load', () => {
-            // Check if we're on HTTPS and server doesn't support WSS
-            if (window.location.protocol === 'https:' && WS_URL.startsWith('ws://')) {
-                updateStatus('⚠️ Secure connection required. Open this page locally or use HTTP.', '#ff9800');
-                document.getElementById('stopBtn').style.display = 'none';
-                
-                // Show instructions
-                const info = document.querySelector('.info-box p');
-                if (info) {
-                    info.innerHTML = 'GitHub Pages requires secure WebSocket (WSS).<br>To use this app: <br>1. Download and open locally<br>2. Or visit via HTTP (not HTTPS)';
-                }
-                return;
-            }
-            
             setTimeout(() => {
                 console.log('Auto-joining conference...');
                 startCall();
