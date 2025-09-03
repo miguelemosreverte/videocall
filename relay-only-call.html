@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Server-Routed Video Call (TURN Relay)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+      color: white;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 10px;
+    }
+
+    .info {
+      text-align: center;
+      padding: 15px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 10px;
+      margin-bottom: 20px;
+    }
+
+    .info.success {
+      background: rgba(76,175,80,0.2);
+      border: 1px solid #4CAF50;
+    }
+
+    .info.error {
+      background: rgba(244,67,54,0.2);
+      border: 1px solid #f44336;
+    }
+
+    .controls {
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+
+    button {
+      padding: 12px 30px;
+      font-size: 16px;
+      border: none;
+      border-radius: 5px;
+      background: #4CAF50;
+      color: white;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    button:hover:not(:disabled) {
+      background: #45a049;
+    }
+
+    button:disabled {
+      background: #666;
+      cursor: not-allowed;
+    }
+
+    .videos {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    .video-box {
+      background: rgba(0,0,0,0.3);
+      border-radius: 10px;
+      padding: 10px;
+      position: relative;
+    }
+
+    .video-label {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      background: rgba(0,0,0,0.8);
+      padding: 5px 15px;
+      border-radius: 5px;
+      z-index: 10;
+      font-size: 14px;
+    }
+
+    video {
+      width: 100%;
+      height: auto;
+      min-height: 300px;
+      border-radius: 5px;
+      background: #000;
+    }
+
+    .stats {
+      display: flex;
+      justify-content: space-around;
+      padding: 20px;
+      background: rgba(0,0,0,0.3);
+      border-radius: 10px;
+    }
+
+    .stat {
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: bold;
+      color: #4CAF50;
+    }
+
+    .stat-label {
+      font-size: 12px;
+      color: #aaa;
+      margin-top: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🌐 Server-Routed Video Conference</h1>
+    <p style="text-align: center; color: #aaa; margin-bottom: 20px;">
+      All video traffic goes through VPS TURN relay (no direct connections)
+    </p>
+    
+    <div class="info" id="status">
+      Initializing... Click "Join Room" to start
+    </div>
+    
+    <div class="controls">
+      <button id="joinBtn" onclick="joinRoom()">Join Room</button>
+      <button id="leaveBtn" onclick="leaveRoom()" disabled>Leave Room</button>
+      <button id="muteBtn" onclick="toggleMute()" disabled>Mute</button>
+    </div>
+    
+    <div class="videos" id="videosContainer">
+      <!-- Videos will be added here -->
+    </div>
+    
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-value" id="participants">0</div>
+        <div class="stat-label">Participants</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="relay">TURN</div>
+        <div class="stat-label">Relay Type</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="bitrate">0</div>
+        <div class="stat-label">Kbps</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Configuration
+    const SERVER_URL = 'ws://194.87.103.57:3000/ws';
+    const ICE_SERVERS = [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'turn:194.87.103.57:3478', username: 'turnuser', credential: 'turnpass' }
+    ];
+    
+    let ws = null;
+    let localStream = null;
+    let myId = null;
+    let peers = new Map();
+    let isJoined = false;
+    
+    async function joinRoom() {
+      try {
+        updateStatus('Accessing camera and microphone...', 'info');
+        
+        // Get user media first
+        localStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            frameRate: { max: 30 }
+          },
+          audio: true
+        });
+        
+        // Add local video
+        addVideo('local', localStream, 'You');
+        
+        // Connect to signaling server
+        connectSignaling();
+        
+        document.getElementById('joinBtn').disabled = true;
+        document.getElementById('leaveBtn').disabled = false;
+        document.getElementById('muteBtn').disabled = false;
+        
+      } catch (error) {
+        updateStatus('Error: ' + error.message, 'error');
+        console.error('Join error:', error);
+      }
+    }
+    
+    function connectSignaling() {
+      updateStatus('Connecting to server...', 'info');
+      
+      ws = new WebSocket(SERVER_URL);
+      
+      ws.onopen = () => {
+        console.log('Connected to signaling server');
+        isJoined = true;
+        
+        // Register as a participant
+        ws.send(JSON.stringify({
+          type: 'join',
+          room: 'global'
+        }));
+        
+        updateStatus('Connected! Waiting for other participants...', 'success');
+      };
+      
+      ws.onmessage = async (event) => {
+        const message = JSON.parse(event.data);
+        await handleSignaling(message);
+      };
+      
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        updateStatus('Connection error', 'error');
+      };
+      
+      ws.onclose = () => {
+        if (isJoined) {
+          updateStatus('Disconnected from server', 'error');
+          cleanup();
+        }
+      };
+    }
+    
+    async function handleSignaling(message) {
+      console.log('Received:', message.type, message.from);
+      
+      switch (message.type) {
+        case 'welcome':
+          myId = message.id;
+          console.log('My ID:', myId);
+          
+          // Notify I'm ready to receive calls
+          ws.send(JSON.stringify({
+            type: 'ready',
+            id: myId
+          }));
+          break;
+          
+        case 'peer-joined':
+          // New peer joined, THEY will create offer to us
+          // We just prepare to receive it
+          if (message.peerId !== myId) {
+            console.log('New peer joined:', message.peerId);
+          }
+          break;
+          
+        case 'peer-left':
+          // Peer left, cleanup
+          removePeer(message.peerId);
+          break;
+          
+        case 'offer':
+          // Received offer, create answer
+          await handleOffer(message.from, message.offer);
+          break;
+          
+        case 'answer':
+          // Received answer
+          await handleAnswer(message.from, message.answer);
+          break;
+          
+        case 'ice-candidate':
+          // Received ICE candidate
+          await handleIceCandidate(message.from, message.candidate);
+          break;
+          
+        case 'peers':
+          // List of existing peers - WE create offers to them
+          console.log('Existing peers:', message.peers);
+          for (const peerId of message.peers) {
+            if (peerId !== myId) {
+              await createPeerConnection(peerId, true);
+            }
+          }
+          document.getElementById('participants').textContent = message.peers.length;
+          break;
+      }
+    }
+    
+    async function createPeerConnection(peerId, createOffer = false) {
+      if (peers.has(peerId)) {
+        console.log('Peer connection already exists for:', peerId);
+        return peers.get(peerId);
+      }
+      
+      console.log('Creating peer connection for:', peerId);
+      
+      // Create peer connection
+      const pc = new RTCPeerConnection({
+        iceServers: ICE_SERVERS
+      });
+      
+      peers.set(peerId, pc);
+      
+      // Add local stream tracks
+      if (localStream) {
+        localStream.getTracks().forEach(track => {
+          console.log('Adding track to peer connection:', track.kind, track.enabled);
+          pc.addTrack(track, localStream);
+        });
+      } else {
+        console.warn('No local stream available when creating peer connection');
+      }
+      
+      // Handle remote stream
+      let remoteStreamAdded = false;
+      pc.ontrack = (event) => {
+        console.log('Received remote track from:', peerId, 'Track:', event.track.kind);
+        if (event.streams && event.streams[0]) {
+          // Only add video element once per stream, not per track
+          if (!remoteStreamAdded) {
+            console.log('Adding remote video for:', peerId);
+            addVideo(peerId, event.streams[0], `User ${peerId.substr(0,6)}`);
+            remoteStreamAdded = true;
+          } else {
+            console.log('Video element already exists for:', peerId, '- skipping');
+          }
+        } else {
+          console.error('No streams in track event from:', peerId);
+        }
+      };
+      
+      // Handle ICE candidates
+      pc.onicecandidate = (event) => {
+        if (event.candidate && ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'ice-candidate',
+            to: peerId,
+            from: myId,
+            candidate: event.candidate
+          }));
+        }
+      };
+      
+      // Monitor connection state
+      pc.onconnectionstatechange = () => {
+        console.log(`Connection state with ${peerId}: ${pc.connectionState}`);
+        if (pc.connectionState === 'connected') {
+          console.log('✓ Connected to peer:', peerId);
+          checkRelayType(pc);
+        } else if (pc.connectionState === 'failed') {
+          console.error('✗ Connection failed with peer:', peerId);
+        }
+      };
+      
+      // Monitor ICE connection state
+      pc.oniceconnectionstatechange = () => {
+        console.log(`ICE state with ${peerId}: ${pc.iceConnectionState}`);
+        if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+          console.log('✅ ICE connected with', peerId);
+          // Log which candidate type is being used
+          pc.getStats().then(stats => {
+            stats.forEach(report => {
+              if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                console.log('Using candidate pair:', report.localCandidateId, '->', report.remoteCandidateId);
+              }
+            });
+          });
+        } else if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+          console.error('❌ ICE failed/disconnected with', peerId);
+        }
+      };
+      
+      // Create offer if needed
+      if (createOffer) {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        
+        ws.send(JSON.stringify({
+          type: 'offer',
+          to: peerId,
+          from: myId,
+          offer: offer
+        }));
+      }
+      
+      return pc;  // IMPORTANT: Return the peer connection!
+    }
+    
+    async function handleOffer(from, offer) {
+      console.log('Handling offer from:', from);
+      
+      let pc = peers.get(from);
+      
+      // Create new connection if doesn't exist
+      if (!pc) {
+        pc = await createPeerConnection(from, false);
+        if (!pc) {
+          console.error('Failed to create peer connection for:', from);
+          return;
+        }
+      }
+      
+      // Check state before setting remote description
+      if (pc.signalingState === 'stable' || pc.signalingState === 'have-local-offer') {
+        try {
+          console.log('Setting remote offer from', from);
+          await pc.setRemoteDescription(new RTCSessionDescription(offer));
+          
+          console.log('Creating answer for', from);
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          
+          console.log('Sending answer to', from);
+          ws.send(JSON.stringify({
+            type: 'answer',
+            to: from,
+            from: myId,
+            answer: answer
+          }));
+        } catch (error) {
+          console.error('Error handling offer from', from, error);
+        }
+      } else {
+        console.log('Ignoring offer - wrong state:', pc.signalingState);
+      }
+    }
+    
+    async function handleAnswer(from, answer) {
+      console.log('Handling answer from:', from);
+      const pc = peers.get(from);
+      if (pc && pc.signalingState === 'have-local-offer') {
+        try {
+          console.log('Setting remote answer from', from);
+          await pc.setRemoteDescription(new RTCSessionDescription(answer));
+          console.log('Remote answer set successfully for', from);
+        } catch (error) {
+          console.error('Error setting answer from', from, error);
+        }
+      } else {
+        console.log('Ignoring answer - wrong state:', pc ? pc.signalingState : 'no PC');
+      }
+    }
+    
+    async function handleIceCandidate(from, candidate) {
+      const pc = peers.get(from);
+      if (!pc) {
+        console.warn('No peer connection for', from, '- queueing ICE candidate');
+        // Queue the candidate for later
+        return;
+      }
+      
+      if (candidate) {
+        try {
+          // Wait for remote description to be set
+          if (pc.remoteDescription && pc.remoteDescription.type) {
+            console.log('Adding ICE candidate from', from);
+            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          } else {
+            console.log('Remote description not set yet, queueing ICE candidate');
+            // Queue it and try again later
+            setTimeout(() => handleIceCandidate(from, candidate), 100);
+          }
+        } catch (e) {
+          console.error('Error adding ICE candidate:', e);
+        }
+      }
+    }
+    
+    function addVideo(id, stream, label) {
+      // Check if video already exists
+      if (document.getElementById('video-' + id)) {
+        console.log('Video element already exists for:', id, '- updating stream');
+        const existingVideo = document.querySelector('#video-' + id + ' video');
+        if (existingVideo) {
+          existingVideo.srcObject = stream;
+          return;
+        }
+      }
+      
+      console.log('Adding video element for:', id, 'Stream active:', stream.active);
+      console.log('Stream tracks:', stream.getTracks().map(t => t.kind + ':' + t.enabled));
+      
+      const videoBox = document.createElement('div');
+      videoBox.className = 'video-box';
+      videoBox.id = 'video-' + id;
+      
+      const labelDiv = document.createElement('div');
+      labelDiv.className = 'video-label';
+      labelDiv.textContent = label;
+      
+      const video = document.createElement('video');
+      video.autoplay = true;
+      video.playsinline = true;
+      video.playsInline = true; // iOS compatibility
+      video.setAttribute('playsinline', ''); // Extra iOS compatibility
+      if (id === 'local') {
+        video.muted = true;
+      }
+      video.srcObject = stream;
+      
+      videoBox.appendChild(labelDiv);
+      videoBox.appendChild(video);
+      
+      document.getElementById('videosContainer').appendChild(videoBox);
+      
+      // Force play after adding to DOM
+      setTimeout(() => {
+        video.play().catch(e => {
+          console.error('Error playing video for', id, e);
+          // Try once more with muted
+          video.muted = true;
+          video.play().catch(e2 => {
+            console.error('Still cannot play video for', id, e2);
+          });
+        });
+      }, 100);
+    }
+    
+    function removeVideo(id) {
+      const element = document.getElementById('video-' + id);
+      if (element) {
+        element.remove();
+      }
+    }
+    
+    function removePeer(peerId) {
+      const pc = peers.get(peerId);
+      if (pc) {
+        pc.close();
+        peers.delete(peerId);
+      }
+      removeVideo(peerId);
+      
+      document.getElementById('participants').textContent = peers.size;
+    }
+    
+    async function checkRelayType(pc) {
+      const stats = await pc.getStats();
+      stats.forEach(report => {
+        if (report.type === 'candidate-pair' && report.selected) {
+          const local = report.localCandidateId;
+          const remote = report.remoteCandidateId;
+          
+          stats.forEach(candidate => {
+            if (candidate.id === local && candidate.candidateType === 'relay') {
+              document.getElementById('relay').textContent = 'TURN ✓';
+              console.log('Using TURN relay!');
+            }
+          });
+        }
+      });
+    }
+    
+    function toggleMute() {
+      if (localStream) {
+        const audioTrack = localStream.getAudioTracks()[0];
+        if (audioTrack) {
+          audioTrack.enabled = !audioTrack.enabled;
+          document.getElementById('muteBtn').textContent = 
+            audioTrack.enabled ? 'Mute' : 'Unmute';
+        }
+      }
+    }
+    
+    function leaveRoom() {
+      cleanup();
+      document.getElementById('joinBtn').disabled = false;
+      document.getElementById('leaveBtn').disabled = true;
+      document.getElementById('muteBtn').disabled = true;
+      updateStatus('Left the room', 'info');
+    }
+    
+    function cleanup() {
+      isJoined = false;
+      
+      // Close all peer connections
+      peers.forEach(pc => pc.close());
+      peers.clear();
+      
+      // Stop local stream
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+      }
+      
+      // Close WebSocket
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+      
+      // Clear videos
+      document.getElementById('videosContainer').innerHTML = '';
+      document.getElementById('participants').textContent = '0';
+    }
+    
+    function updateStatus(message, type = 'info') {
+      const status = document.getElementById('status');
+      status.textContent = message;
+      status.className = 'info ' + type;
+    }
+    
+    // Monitor stats
+    setInterval(async () => {
+      if (peers.size > 0) {
+        let totalBitrate = 0;
+        for (const [id, pc] of peers) {
+          const stats = await pc.getStats();
+          stats.forEach(report => {
+            if (report.type === 'inbound-rtp' && report.kind === 'video') {
+              totalBitrate += (report.bytesReceived * 8 / 1000);
+            }
+          });
+        }
+        document.getElementById('bitrate').textContent = Math.round(totalBitrate);
+      }
+    }, 1000);
+  </script>
+</body>
+</html>

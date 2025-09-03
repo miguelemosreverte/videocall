@@ -1,0 +1,10 @@
+# Copy this file to terraform.tfvars and fill in your values
+
+# Your Google Cloud Project ID
+project_id = "your-project-id-here"
+
+# Region for deployment (us-central1 is usually good for US)
+region = "us-central1"
+
+# Service name (optional, defaults to websocket-hello-world)
+# service_name = "websocket-hello-world"

@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>VPS WebSocket Test</title>
+    <style>
+        body { 
+            font-family: 'SF Mono', Monaco, monospace; 
+            padding: 20px;
+            background: #1a1a1a;
+            color: #e0e0e0;
+        }
+        h1 { color: #4CAF50; }
+        #status { 
+            padding: 10px;
+            border-radius: 5px;
+            display: inline-block;
+            font-weight: bold;
+        }
+        #status.connected { 
+            background: #4CAF50; 
+            color: white; 
+        }
+        #status.disconnected { 
+            background: #f44336; 
+            color: white; 
+        }
+        #log { 
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 5px;
+            height: 400px; 
+            overflow-y: auto; 
+            padding: 15px;
+            margin: 20px 0;
+            font-size: 14px;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px;
+            border-left: 3px solid;
+        }
+        .connected { 
+            color: #4CAF50;
+            border-color: #4CAF50;
+        }
+        .disconnected { 
+            color: #f44336;
+            border-color: #f44336;
+        }
+        .sent { 
+            color: #2196F3;
+            border-color: #2196F3;
+        }
+        .received { 
+            color: #9C27B0;
+            border-color: #9C27B0;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #444;
+            border-radius: 5px;
+            background: #2a2a2a;
+            color: #e0e0e0;
+            font-size: 14px;
+        }
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            background: #4CAF50;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        .info {
+            background: #2a2a2a;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .info h3 {
+            margin-top: 0;
+            color: #4CAF50;
+        }
+    </style>
+</head>
+<body>
+    <h1>🚀 VPS WebSocket Test Client</h1>
+    
+    <div class="info">
+        <h3>Server Information</h3>
+        <div>VPS IP: 194.87.103.57</div>
+        <div>WebSocket URL: ws://194.87.103.57:8080/ws</div>
+        <div>Status: <span id="status" class="disconnected">Disconnected</span></div>
+    </div>
+    
+    <div id="log"></div>
+    
+    <div class="controls">
+        <input type="text" id="message" placeholder="Type a message and press Enter..." disabled>
+        <button id="sendBtn" onclick="sendMessage()" disabled>Send</button>
+        <button id="connectBtn" onclick="toggleConnection()">Connect</button>
+    </div>
+    
+    <script>
+        let ws = null;
+        const VPS_IP = '194.87.103.57';
+        const VPS_PORT = '8080';
+        
+        function log(message, className) {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry ' + className;
+            const time = new Date().toLocaleTimeString();
+            entry.innerHTML = `<strong>[${time}]</strong> ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        function updateStatus(connected) {
+            const status = document.getElementById('status');
+            const connectBtn = document.getElementById('connectBtn');
+            const sendBtn = document.getElementById('sendBtn');
+            const messageInput = document.getElementById('message');
+            
+            if (connected) {
+                status.textContent = 'Connected';
+                status.className = 'connected';
+                connectBtn.textContent = 'Disconnect';
+                sendBtn.disabled = false;
+                messageInput.disabled = false;
+                messageInput.focus();
+            } else {
+                status.textContent = 'Disconnected';
+                status.className = 'disconnected';
+                connectBtn.textContent = 'Connect';
+                sendBtn.disabled = true;
+                messageInput.disabled = true;
+            }
+        }
+        
+        function connect() {
+            if (ws) return;
+            
+            const url = `ws://${VPS_IP}:${VPS_PORT}/ws`;
+            log(`Connecting to ${url}...`, 'sent');
+            
+            try {
+                ws = new WebSocket(url);
+                
+                ws.onopen = function() {
+                    log('✅ Connected to VPS WebSocket server', 'connected');
+                    updateStatus(true);
+                };
+                
+                ws.onmessage = function(event) {
+                    log('📥 ' + event.data, 'received');
+                    
+                    // Try to parse as JSON
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data.type === 'welcome') {
+                            log('🎉 Server welcomed us at ' + data.time, 'received');
+                        }
+                    } catch (e) {
+                        // Not JSON, that's okay
+                    }
+                };
+                
+                ws.onclose = function(event) {
+                    log(`❌ Disconnected (Code: ${event.code}, Reason: ${event.reason || 'None'})`, 'disconnected');
+                    updateStatus(false);
+                    ws = null;
+                };
+                
+                ws.onerror = function(error) {
+                    log('⚠️ WebSocket error occurred', 'disconnected');
+                    console.error('WebSocket error:', error);
+                };
+            } catch (error) {
+                log('⚠️ Failed to create WebSocket: ' + error.message, 'disconnected');
+                ws = null;
+            }
+        }
+        
+        function disconnect() {
+            if (ws) {
+                log('Closing connection...', 'sent');
+                ws.close();
+                ws = null;
+            }
+        }
+        
+        function toggleConnection() {
+            if (ws) {
+                disconnect();
+            } else {
+                connect();
+            }
+        }
+        
+        function sendMessage() {
+            const input = document.getElementById('message');
+            const message = input.value.trim();
+            
+            if (!message) return;
+            
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const payload = JSON.stringify({
+                    message: message,
+                    timestamp: new Date().toISOString()
+                });
+                ws.send(payload);
+                log('📤 ' + payload, 'sent');
+                input.value = '';
+            } else {
+                log('⚠️ Not connected to server', 'disconnected');
+            }
+        }
+        
+        // Enter key to send
+        document.getElementById('message').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+        
+        // Auto-connect on load
+        window.addEventListener('load', function() {
+            log('🔧 WebSocket test client initialized', 'sent');
+            log('💡 Click "Connect" to establish WebSocket connection', 'sent');
+            // Auto-connect after 1 second
+            setTimeout(connect, 1000);
+        });
+    </script>
+</body>
+</html>
