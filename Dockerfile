@@ -25,9 +25,8 @@ COPY conference-echo-free.go .
 COPY conference-webp-ssl.go .
 
 # Build the echo-free conference server with deployment info (CGO required for WebP)
-RUN CGO_ENABLED=1 GOOS=linux go build \
-    -ldflags "-X main.BuildTime=${BUILD_TIME} -X main.BuildCommit=${BUILD_COMMIT} -X main.BuildBy=${BUILD_BY} -X main.BuildRef=${BUILD_REF}" \
-    -o conference-webp conference-echo-free.go
+# Simplified build without ldflags to debug
+RUN CGO_ENABLED=1 GOOS=linux go build -o conference-webp conference-echo-free.go
 
 # Build the SSL wrapper
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o conference-webp-ssl conference-webp-ssl.go
