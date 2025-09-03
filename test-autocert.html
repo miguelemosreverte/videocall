@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Auto-SSL Test</title>
+    <meta charset="utf-8">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            background: rgba(255,255,255,0.1);
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            max-width: 600px;
+        }
+        h1 { margin-bottom: 30px; }
+        .status {
+            padding: 20px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 10px;
+            margin: 20px 0;
+            font-size: 18px;
+        }
+        .success { background: rgba(0,255,0,0.2); }
+        .error { background: rgba(255,0,0,0.2); }
+        button {
+            padding: 15px 30px;
+            font-size: 18px;
+            border: none;
+            border-radius: 10px;
+            background: white;
+            color: #764ba2;
+            cursor: pointer;
+            font-weight: bold;
+            margin: 10px;
+        }
+        button:hover { transform: scale(1.05); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 Auto-SSL WebSocket Test</h1>
+        <div class="status" id="status">Testing connection...</div>
+        
+        <button onclick="testConnection()">Test WebSocket</button>
+        <button onclick="window.location.href='index.html'">Go to Conference</button>
+        
+        <div style="margin-top: 30px; opacity: 0.8;">
+            <p>Server: wss://194.87.103.57.nip.io/ws</p>
+            <p>Certificate: Let's Encrypt (Auto)</p>
+            <p>No warnings expected!</p>
+        </div>
+    </div>
+
+    <script>
+        function testConnection() {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = 'Connecting to wss://194.87.103.57.nip.io/ws...';
+            statusDiv.className = 'status';
+            
+            try {
+                const ws = new WebSocket('wss://194.87.103.57.nip.io/ws');
+                
+                ws.onopen = () => {
+                    statusDiv.textContent = '✅ Connected successfully! No certificate warnings!';
+                    statusDiv.className = 'status success';
+                    
+                    // Send join message
+                    ws.send(JSON.stringify({
+                        type: 'join',
+                        id: 'test-' + Math.random().toString(36).substr(2, 9),
+                        room: 'test-room'
+                    }));
+                };
+                
+                ws.onmessage = (event) => {
+                    const msg = JSON.parse(event.data);
+                    statusDiv.textContent = `✅ Connected! Server says: ${msg.type}`;
+                    statusDiv.className = 'status success';
+                };
+                
+                ws.onerror = (error) => {
+                    statusDiv.textContent = `❌ Connection error: ${error}`;
+                    statusDiv.className = 'status error';
+                };
+                
+                ws.onclose = () => {
+                    if (statusDiv.className !== 'status success') {
+                        statusDiv.textContent = '❌ Connection closed unexpectedly';
+                        statusDiv.className = 'status error';
+                    }
+                };
+                
+                // Clean up after 5 seconds
+                setTimeout(() => {
+                    if (ws.readyState === WebSocket.OPEN) {
+                        ws.close();
+                        statusDiv.textContent += ' (Connection closed after test)';
+                    }
+                }, 5000);
+                
+            } catch (error) {
+                statusDiv.textContent = `❌ Failed to create WebSocket: ${error.message}`;
+                statusDiv.className = 'status error';
+            }
+        }
+        
+        // Auto-test on load
+        window.addEventListener('load', () => {
+            setTimeout(testConnection, 1000);
+        });
+    </script>
+</body>
+</html>
