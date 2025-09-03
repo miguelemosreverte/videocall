@@ -564,6 +564,25 @@
                 const message = JSON.parse(event.data);
                 
                 switch (message.type) {
+                    case 'user-joined':
+                        addRemoteUser(message.userId);
+                        break;
+                    
+                    case 'user-left':
+                        removeRemoteUser(message.userId);
+                        break;
+                    
+                    case 'participants':
+                        // Handle initial participants list
+                        if (message.users) {
+                            message.users.forEach(userId => {
+                                if (userId !== userId) {
+                                    addRemoteUser(userId);
+                                }
+                            });
+                        }
+                        break;
+                    
                     case 'quality-change':
                         handleQualityChange(message);
                         break;
@@ -803,13 +822,59 @@
         }
         
         function displayRemoteFrame(message) {
-            // Handle remote video frames
-            // Implementation depends on your UI structure
+            // Create container if it doesn't exist
+            if (!document.getElementById(`container-${message.from}`) && message.from) {
+                addRemoteUser(message.from || message.From);
+            }
+            
+            const userId = message.from || message.From;
+            const canvas = document.getElementById(`canvas-${userId}`);
+            if (canvas) {
+                const ctx = canvas.getContext('2d');
+                const img = new Image();
+                img.onload = () => {
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                };
+                img.src = 'data:image/webp;base64,' + message.data;
+            }
+        }
+        
+        function addRemoteUser(userId) {
+            if (!userId || document.getElementById(`container-${userId}`)) return;
+            
+            const container = document.createElement('div');
+            container.className = 'video-container';
+            container.id = `container-${userId}`;
+            container.dataset.userId = userId;
+            
+            const canvas = document.createElement('canvas');
+            canvas.id = `canvas-${userId}`;
+            canvas.width = 640;
+            canvas.height = 480;
+            
+            const qualityIndicator = document.createElement('div');
+            qualityIndicator.className = 'quality-indicator';
+            qualityIndicator.innerHTML = `
+                <span>👤</span>
+                <span class="badge">HD</span>
+                <span>User ${userId.substring(0, 6)}</span>
+            `;
+            
+            container.appendChild(canvas);
+            container.appendChild(qualityIndicator);
+            document.getElementById('videoGrid').appendChild(container);
+        }
+        
+        function removeRemoteUser(userId) {
+            const container = document.getElementById(`container-${userId}`);
+            if (container) {
+                container.remove();
+            }
         }
         
         function playRemoteAudio(message) {
-            // Handle remote audio
-            // Implementation depends on your audio setup
+            // Simple audio playback - can be enhanced with Web Audio API
+            console.log('Audio from user:', message.from || message.From);
         }
         
         function setupControls() {
