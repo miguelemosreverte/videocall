@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>WebP Video Conference - VPS</title>
+    <title>WebP Video Conference - Optimized</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
@@ -161,6 +161,29 @@
             gap: 15px;
         }
         
+        .audio-indicator {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: rgba(76, 175, 80, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .audio-indicator.active {
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.7; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        
         @media (max-width: 768px) {
             .container {
                 width: 95%;
@@ -175,7 +198,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>🎥 WebP Conference (Russia-Ready)</h1>
+        <h1>🎥 WebP Conference (Audio Fixed)</h1>
         
         <div id="status" class="status disconnected">
             📡 Ready to connect to VPS
@@ -184,6 +207,7 @@
         <div class="controls">
             <button class="primary" onclick="startConference()">Join Conference</button>
             <button class="secondary" onclick="disconnect()">Leave</button>
+            <button class="secondary" onclick="toggleAudio()">🔇 Mute</button>
         </div>
         
         <div class="stats">
@@ -211,6 +235,7 @@
                 <div class="video-container">
                     <video id="localVideo" autoplay muted playsinline></video>
                     <div class="video-label">You</div>
+                    <div class="audio-indicator" id="localAudioIndicator">🎤</div>
                 </div>
             </div>
             <div>
@@ -229,6 +254,7 @@
         let userId = 'user-' + Math.random().toString(36).substr(2, 9);
         let roomId = 'conference-room';
         let isConnected = false;
+        let audioMuted = false;
         
         // Stats tracking
         let frameCount = 0;
@@ -238,32 +264,38 @@
         let compressionRatios = [];
         let remoteUsers = new Set();
         
-        // Audio context for proper audio handling
+        // Audio handling - FIXED!
         let audioContext = null;
         let audioProcessor = null;
+        let remoteAudioBuffers = {};
+        let audioWorkletNode = null;
         
         async function startConference() {
             updateStatus('connecting', '🔄 Connecting to VPS...');
             
             try {
-                // Get user media
+                // Get user media with lower resolution for faster performance
                 localStream = await navigator.mediaDevices.getUserMedia({
                     video: {
-                        width: { ideal: 320 },
-                        height: { ideal: 240 },
-                        frameRate: { ideal: 15 }
+                        width: { ideal: 320, max: 640 },
+                        height: { ideal: 240, max: 480 },
+                        frameRate: { ideal: 15, max: 30 }
                     },
                     audio: {
                         echoCancellation: true,
                         noiseSuppression: true,
-                        autoGainControl: true
+                        autoGainControl: true,
+                        sampleRate: 16000  // Lower sample rate for smaller data
                     }
                 });
                 
                 document.getElementById('localVideo').srcObject = localStream;
                 
-                // Setup audio processing
-                setupAudioProcessing();
+                // Initialize audio context for playback
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                
+                // Setup audio processing for sending
+                setupAudioSending();
                 
                 // Connect to WebSocket
                 connectWebSocket();
@@ -276,10 +308,11 @@
         
         function connectWebSocket() {
             ws = new WebSocket(WS_URL);
+            ws.binaryType = 'arraybuffer';
             
             ws.onopen = () => {
                 isConnected = true;
-                updateStatus('connected', '✅ Connected to VPS (WebP enabled)');
+                updateStatus('connected', '✅ Connected to VPS (Audio Fixed!)');
                 
                 // Send join message
                 ws.send(JSON.stringify({
@@ -341,7 +374,7 @@
             canvas.width = 320;
             canvas.height = 240;
             
-            // Video streaming at 15 FPS
+            // Video streaming at 10 FPS for better performance
             const videoInterval = setInterval(() => {
                 if (!isConnected || !ws || ws.readyState !== WebSocket.OPEN) {
                     clearInterval(videoInterval);
@@ -350,7 +383,7 @@
                 
                 ctx.drawImage(video, 0, 0, 320, 240);
                 
-                // Convert to JPEG (server will compress to WebP)
+                // Convert to JPEG with lower quality for faster transmission
                 canvas.toBlob((blob) => {
                     if (!blob) return;
                     
@@ -370,44 +403,100 @@
                         bytesSent += data.length;
                     };
                     reader.readAsDataURL(blob);
-                }, 'image/jpeg', 0.7);
+                }, 'image/jpeg', 0.6);  // Lower quality for faster encoding
                 
-            }, 67); // ~15 FPS
+            }, 100); // 10 FPS for smoother performance
             
             // Store interval for cleanup
             window.videoStreamInterval = videoInterval;
         }
         
-        function setupAudioProcessing() {
+        function setupAudioSending() {
             if (!localStream) return;
             
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            const source = audioContext.createMediaStreamSource(localStream);
-            audioProcessor = audioContext.createScriptProcessor(2048, 1, 1);
+            const audioTrack = localStream.getAudioTracks()[0];
+            if (!audioTrack) return;
             
-            audioProcessor.onaudioprocess = (e) => {
-                if (!isConnected || !ws || ws.readyState !== WebSocket.OPEN) return;
+            const mediaStreamSource = audioContext.createMediaStreamSource(localStream);
+            const processor = audioContext.createScriptProcessor(2048, 1, 1);
+            
+            processor.onaudioprocess = (e) => {
+                if (!isConnected || !ws || ws.readyState !== WebSocket.OPEN || audioMuted) return;
                 
                 const inputData = e.inputBuffer.getChannelData(0);
-                const pcmData = new Int16Array(inputData.length);
                 
+                // Convert float32 to int16
+                const pcm16 = new Int16Array(inputData.length);
                 for (let i = 0; i < inputData.length; i++) {
-                    pcmData[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+                    const s = Math.max(-1, Math.min(1, inputData[i]));
+                    pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
                 }
                 
-                const base64 = btoa(String.fromCharCode(...new Uint8Array(pcmData.buffer)));
+                // Convert to base64
+                const base64 = btoa(String.fromCharCode(...new Uint8Array(pcm16.buffer)));
                 
+                // Send audio chunk
                 ws.send(JSON.stringify({
                     type: 'audio-chunk',
                     data: base64,
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    samples: pcm16.length
                 }));
                 
                 bytesSent += base64.length;
+                
+                // Animate audio indicator
+                const indicator = document.getElementById('localAudioIndicator');
+                if (indicator) {
+                    indicator.classList.add('active');
+                    setTimeout(() => indicator.classList.remove('active'), 100);
+                }
             };
             
-            source.connect(audioProcessor);
-            audioProcessor.connect(audioContext.destination);
+            mediaStreamSource.connect(processor);
+            processor.connect(audioContext.destination);
+            audioProcessor = processor;
+        }
+        
+        function playRemoteAudio(userId, audioData) {
+            if (!audioContext) return;
+            
+            try {
+                // Decode base64 to ArrayBuffer
+                const binaryString = atob(audioData);
+                const len = binaryString.length;
+                const bytes = new Uint8Array(len);
+                for (let i = 0; i < len; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                
+                // Convert int16 to float32
+                const int16Array = new Int16Array(bytes.buffer);
+                const float32Array = new Float32Array(int16Array.length);
+                for (let i = 0; i < int16Array.length; i++) {
+                    float32Array[i] = int16Array[i] / 32768.0;
+                }
+                
+                // Create audio buffer
+                const audioBuffer = audioContext.createBuffer(1, float32Array.length, audioContext.sampleRate);
+                audioBuffer.getChannelData(0).set(float32Array);
+                
+                // Play the audio
+                const source = audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioContext.destination);
+                source.start();
+                
+                // Animate remote audio indicator
+                const indicator = document.getElementById(`audio-${userId}`);
+                if (indicator) {
+                    indicator.classList.add('active');
+                    setTimeout(() => indicator.classList.remove('active'), 100);
+                }
+                
+            } catch (err) {
+                console.error('Audio playback error:', err);
+            }
         }
         
         function displayRemoteVideo(userId, frameData, frameSize, compressionType) {
@@ -420,6 +509,7 @@
                 container.innerHTML = `
                     <img id="frame-${userId}" alt="Remote video">
                     <div class="video-label">${userId}</div>
+                    <div class="audio-indicator" id="audio-${userId}">🔊</div>
                 `;
                 document.getElementById('remoteVideos').appendChild(container);
             }
@@ -440,9 +530,16 @@
             }
         }
         
-        function playRemoteAudio(userId, audioData) {
-            // Simplified audio playback (in production, use Web Audio API for better quality)
-            // This is just for demonstration
+        function toggleAudio() {
+            audioMuted = !audioMuted;
+            const btn = event.target;
+            btn.textContent = audioMuted ? '🔊 Unmute' : '🔇 Mute';
+            
+            if (localStream) {
+                localStream.getAudioTracks().forEach(track => {
+                    track.enabled = !audioMuted;
+                });
+            }
         }
         
         function updateStats() {
@@ -485,7 +582,7 @@
                 audioProcessor = null;
             }
             
-            if (audioContext) {
+            if (audioContext && audioContext.state !== 'closed') {
                 audioContext.close();
                 audioContext = null;
             }
@@ -520,10 +617,9 @@
         // Update stats every second
         setInterval(updateStats, 1000);
         
-        // Auto-join on load
-        window.addEventListener('load', () => {
-            // Uncomment to auto-join:
-            // setTimeout(startConference, 500);
+        // Clean up on page unload
+        window.addEventListener('beforeunload', () => {
+            disconnect();
         });
     </script>
 </body>
