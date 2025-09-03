@@ -1,8 +1,8 @@
 # Multi-stage build for optimized Go binary
 FROM golang:1.23.4-alpine AS builder
 
-# Install build dependencies
-RUN apk add --no-cache git gcc musl-dev
+# Install build dependencies (including libwebp for CGO)
+RUN apk add --no-cache git gcc g++ musl-dev libwebp-dev
 
 # Build arguments for deployment info
 ARG BUILD_TIME=unknown
@@ -16,15 +16,15 @@ WORKDIR /build
 # Copy go mod files
 COPY go.mod go.sum ./
 
-# Download dependencies
-RUN go mod download
+# Download dependencies (with verbose to debug)
+RUN go mod download -x
 
 # Copy source code
 COPY conference-echo-free.go .
 COPY conference-webp-ssl.go .
 
-# Build the echo-free conference server with deployment info
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo \
+# Build the echo-free conference server with deployment info (CGO required for WebP)
+RUN CGO_ENABLED=1 GOOS=linux go build -a \
     -ldflags "-X main.BuildTime=${BUILD_TIME} -X main.BuildCommit=${BUILD_COMMIT} -X main.BuildBy=${BUILD_BY} -X main.BuildRef=${BUILD_REF}" \
     -o conference-webp conference-echo-free.go
 
@@ -34,8 +34,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o conference-webp-s
 # Final stage - minimal image
 FROM alpine:latest
 
-# Install ca-certificates for HTTPS
-RUN apk --no-cache add ca-certificates
+# Install ca-certificates for HTTPS and libwebp for runtime
+RUN apk --no-cache add ca-certificates libwebp
 
 WORKDIR /app
 
