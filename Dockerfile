@@ -21,12 +21,14 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy source code
-COPY conference-echo-free.go .
+COPY conference-simple.go .
 COPY conference-webp-ssl.go .
 
-# Build the echo-free conference server with deployment info (CGO required for WebP)
+# Build the simple conference server (no CGO needed, much faster)
 # Build for the target architecture (will be set by buildx)
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=${TARGETARCH:-arm64} go build -o conference-webp conference-echo-free.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-arm64} go build \
+    -ldflags "-X main.BuildTime=${BUILD_TIME} -X main.BuildCommit=${BUILD_COMMIT} -X main.BuildBy=${BUILD_BY} -X main.BuildRef=${BUILD_REF}" \
+    -o conference-webp conference-simple.go
 
 # Build the SSL wrapper
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o conference-webp-ssl conference-webp-ssl.go
