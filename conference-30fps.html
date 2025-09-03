@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Video Conference</title>
+    <title>Conference Client - 30 FPS Audio Priority</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -139,11 +139,16 @@
 </head>
 <body>
     <div class="container">
-        <h1>🎥 Video Conference</h1>
+        <h1>🎥 30 FPS Conference - Perfect Audio</h1>
         
-        <div class="info-box" id="infoBox">
-            <p>Connecting to conference...</p>
+        <div class="info-box">
+            <p>High-quality audio with 30 FPS video support</p>
             <p>Server: <code id="serverDisplay">ws://194.87.103.57:3001/ws</code></p>
+        </div>
+        
+        <div class="server-input">
+            <input type="text" id="serverUrl" placeholder="ws://194.87.103.57:3001/ws" value="ws://194.87.103.57:3001/ws">
+            <button onclick="saveServer()">Set Server</button>
         </div>
         
         <div class="status" id="status">
@@ -151,7 +156,8 @@
         </div>
         
         <div class="controls">
-            <button id="stopBtn" onclick="stopCall()" style="display:none">Leave Call</button>
+            <button id="startBtn" onclick="startCall()">Start Call</button>
+            <button id="stopBtn" onclick="stopCall()" disabled>End Call</button>
             <button id="muteAudioBtn" onclick="toggleAudio()" disabled>🎤 Audio</button>
             <button id="muteVideoBtn" onclick="toggleVideo()" disabled>📹 Video</button>
             
@@ -294,7 +300,8 @@
                 connectWebSocket();
                 
                 // Update UI
-                document.getElementById('stopBtn').style.display = 'inline-block';
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
                 document.getElementById('muteAudioBtn').disabled = false;
                 document.getElementById('muteVideoBtn').disabled = false;
                 
@@ -814,17 +821,10 @@
             document.getElementById('videosContainer').innerHTML = '';
             
             // Reset buttons
-            document.getElementById('stopBtn').style.display = 'none';
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
             document.getElementById('muteAudioBtn').disabled = true;
             document.getElementById('muteVideoBtn').disabled = true;
-            
-            // Auto-reconnect after 2 seconds
-            setTimeout(() => {
-                if (!isConnected) {
-                    console.log('Auto-reconnecting...');
-                    startCall();
-                }
-            }, 2000);
             
             updateStatus('Call ended', '#9e9e9e');
         }
@@ -879,29 +879,6 @@
             document.getElementById('videoRes').textContent = 
                 `${currentQuality.width}x${currentQuality.height}`;
         }, 1000);
-        
-        // Auto-join on page load
-        window.addEventListener('load', () => {
-            setTimeout(() => {
-                console.log('Auto-joining conference...');
-                startCall();
-            }, 500);
-        });
-        
-        // Handle page visibility changes
-        document.addEventListener('visibilitychange', () => {
-            if (!document.hidden && !isConnected && !ws) {
-                console.log('Page became visible, rejoining...');
-                startCall();
-            }
-        });
-        
-        // Cleanup on page unload
-        window.addEventListener('beforeunload', () => {
-            if (ws) {
-                ws.close();
-            }
-        });
     </script>
 </body>
 </html>
