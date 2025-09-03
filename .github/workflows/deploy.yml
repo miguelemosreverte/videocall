@@ -45,6 +45,15 @@ jobs:
         path: build.log
         retention-days: 7
     
+    - name: Copy files to server
+      uses: appleboy/scp-action@v0.1.5
+      with:
+        host: 91.99.159.21
+        username: root
+        key: ${{ secrets.HETZNER_SSH_KEY }}
+        source: "conference.tar.gz,docker-compose.yml,Caddyfile"
+        target: "/root/conference"
+    
     - name: Deploy to Hetzner
       uses: appleboy/ssh-action@v1.0.0
       with:
