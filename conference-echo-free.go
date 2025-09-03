@@ -822,8 +822,8 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
         },
         "server": map[string]interface{}{
             "type":     "echo-free-conference",
-            "version":  "1.0.0",
-            "features": []string{"echo-cancellation", "VAD", "audio-ducking", "webp-compression"},
+            "version":  "1.1.0",
+            "features": []string{"echo-cancellation", "VAD", "audio-ducking", "webp-compression", "deployment-tracking"},
         },
         "timestamp": time.Now().UTC().Format(time.RFC3339),
     }
