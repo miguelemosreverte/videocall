@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Forest Friends Video Call - PeerJS</title>
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+  <!-- PeerJS -->
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      min-height: 100vh;
+      overflow: hidden;
+      position: relative;
+      background: #87CEEB;
+    }
+
+    /* Loading states */
+    .background-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+    }
+
+    .background-image {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      min-width: 100%;
+      min-height: 100%;
+      width: auto;
+      height: auto;
+      object-fit: cover;
+      opacity: 0;
+      transition: opacity 0.5s ease-in-out;
+    }
+
+    .background-image.loaded {
+      opacity: 1;
+    }
+
+    .background-image.animated {
+      animation: slowZoom 60s ease-in-out infinite alternate;
+    }
+
+    @keyframes slowZoom {
+      0% { transform: translate(-50%, -50%) scale(1); }
+      100% { transform: translate(-50%, -50%) scale(1.3); }
+    }
+
+    /* Loading gradient while image loads */
+    .loading-gradient {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, #87CEEB 0%, #98D98E 50%, #90EE90 100%);
+      opacity: 1;
+      transition: opacity 1s ease-out;
+    }
+
+    .loading-gradient.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* Main content */
+    .container {
+      position: relative;
+      z-index: 10;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .avatar-grid {
+      display: flex;
+      justify-content: center;
+      gap: clamp(30px, 5vw, 60px);
+      flex-wrap: wrap;
+    }
+
+    .avatar-option {
+      cursor: pointer;
+      transition: all 0.3s ease;
+      text-align: center;
+    }
+
+    .avatar-option:hover {
+      transform: translateY(-5px);
+    }
+
+    .avatar-image {
+      width: clamp(100px, 15vw, 140px);
+      height: clamp(100px, 15vw, 140px);
+      border-radius: 50%;
+      object-fit: cover;
+      border: 4px solid transparent;
+      transition: all 0.3s ease;
+      box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+    }
+
+    .avatar-option:hover .avatar-image {
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      border-color: #90EE90;
+    }
+
+    .avatar-selected .avatar-image {
+      border-color: #4a7c20 !important;
+      box-shadow: 0 0 0 3px rgba(74, 124, 32, 0.2);
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .error-message {
+      color: #d9534f;
+      text-align: center;
+      margin-top: 15px;
+      font-weight: 500;
+    }
+
+    /* Video grid */
+    #videoGrid {
+      display: none;
+      width: 100%;
+      height: 100vh;
+      background: rgba(0,0,0,0.8);
+      padding: 10px;
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 100;
+      transition: all 0.3s ease;
+    }
+
+    .videoContainer {
+      position: relative;
+      background: #000;
+      border-radius: 15px;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .videoContainer:hover {
+      transform: scale(1.02);
+      box-shadow: 0 15px 40px rgba(0,0,0,0.4);
+    }
+
+    .videoContainer video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    /* Focus states */
+    .videoContainer.focused {
+      position: fixed !important;
+      top: 10px;
+      left: 10px;
+      right: 10px;
+      bottom: 10px;
+      z-index: 200;
+      transform: none;
+    }
+
+    .videoContainer.minimized {
+      position: fixed !important;
+      width: 150px !important;
+      height: 100px !important;
+      top: 20px;
+      right: 20px;
+      z-index: 300;
+    }
+
+    .videoContainer.thumbnail {
+      position: fixed !important;
+      width: 120px !important;
+      height: 80px !important;
+      z-index: 250;
+    }
+
+    /* Mobile layouts */
+    @media (max-width: 768px) {
+      #videoGrid {
+        padding: 5px;
+      }
+      
+      .videoContainer.minimized {
+        width: 120px !important;
+        height: 80px !important;
+        top: 10px;
+        right: 10px;
+      }
+      
+      .videoContainer.thumbnail {
+        width: 100px !important;
+        height: 70px !important;
+      }
+      
+      .videoContainer.focused {
+        top: 5px;
+        left: 5px;
+        right: 5px;
+        bottom: 100px; /* Leave space for thumbnails */
+      }
+    }
+
+    /* Portrait orientation */
+    @media (max-width: 768px) and (orientation: portrait) {
+      .thumbnail-strip {
+        position: fixed;
+        bottom: 10px;
+        left: 10px;
+        right: 10px;
+        height: 90px;
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+        z-index: 250;
+      }
+    }
+
+    /* Landscape orientation */
+    @media (max-width: 768px) and (orientation: landscape) {
+      .videoContainer.focused {
+        right: 130px; /* Leave space for side thumbnails */
+        bottom: 5px;
+      }
+      
+      .thumbnail-strip {
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        bottom: 10px;
+        width: 110px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        justify-content: flex-start;
+        z-index: 250;
+      }
+    }
+
+    .peerId {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      color: white;
+      background: rgba(0,0,0,0.5);
+      padding: 5px 10px;
+      border-radius: 5px;
+      font-size: 14px;
+      z-index: 10;
+    }
+
+    .video-controls {
+      position: absolute;
+      bottom: 5px;
+      right: 5px;
+      display: flex;
+      gap: 5px;
+      z-index: 10;
+      transition: all 0.3s ease;
+    }
+
+    .control-btn {
+      background: rgba(0,0,0,0.6);
+      color: white;
+      border: none;
+      padding: 6px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.3s;
+      min-width: 30px;
+      min-height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .control-btn:hover {
+      background: rgba(0,0,0,0.8);
+      transform: scale(1.1);
+    }
+
+    .control-btn.muted {
+      background: rgba(255,0,0,0.6);
+    }
+
+    /* Small video controls */
+    .videoContainer.minimized .video-controls {
+      bottom: 2px;
+      right: 2px;
+      gap: 2px;
+    }
+
+    .videoContainer.minimized .control-btn {
+      padding: 3px 4px;
+      font-size: 10px;
+      min-width: 20px;
+      min-height: 20px;
+      border-radius: 3px;
+    }
+
+    .videoContainer.thumbnail .video-controls {
+      bottom: 2px;
+      right: 2px;
+      gap: 2px;
+    }
+
+    .videoContainer.thumbnail .control-btn {
+      padding: 2px 3px;
+      font-size: 8px;
+      min-width: 16px;
+      min-height: 16px;
+      border-radius: 2px;
+    }
+
+    /* Hide controls on very small containers to prevent overlap */
+    @media (max-width: 768px) {
+      .videoContainer.minimized .video-controls,
+      .videoContainer.thumbnail .video-controls {
+        opacity: 0;
+        pointer-events: none;
+      }
+      
+      .videoContainer.minimized:hover .video-controls,
+      .videoContainer.thumbnail:hover .video-controls {
+        opacity: 1;
+        pointer-events: all;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="background-container">
+    <div class="loading-gradient" id="loadingGradient"></div>
+    <img class="background-image" id="backgroundImage" />
+  </div>
+
+  <div class="container">
+    <div class="avatar-grid" id="userSelection"></div>
+    <div class="error-message" id="errorMessage"></div>
+  </div>
+
+  <div id="videoGrid"></div>
+
+  <script>
+    // Firebase configuration
+    const firebaseConfig = {
+      apiKey: "AIzaSyCYZGxmEuqIuDzpmqCBfSkqY7r606xFnvM",
+      authDomain: "videocall-signalling.firebaseapp.com",
+      databaseURL: "https://videocall-signalling-default-rtdb.firebaseio.com",
+      projectId: "videocall-signalling",
+      storageBucket: "videocall-signalling.firebasestorage.app",
+      messagingSenderId: "1016443322452",
+      appId: "1:1016443322452:web:bfe5e3695f41721b5aedc1"
+    };
+    
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    const database = firebase.database();
+
+    const users = [
+      { name: "Miguel", avatar: "avatar-0.webp", emoji: "🦔" },
+      { name: "Anastasiia", avatar: "avatar-6.webp", emoji: "🐿️" },
+      { name: "Mariana", avatar: "avatar-5.webp", emoji: "🦜" }
+    ];
+
+    let myUuid = null;
+    let localStream = null;
+    let peer = null;
+    const activeCalls = new Map();
+    let focusedUser = null;
+    let isMobile = window.innerWidth <= 768;
+
+    // Initialize
+    window.addEventListener('load', async () => {
+      // Global safety net - always ensure loading gradient disappears
+      setTimeout(() => {
+        try {
+          const loadingGradient = document.getElementById('loadingGradient');
+          if (loadingGradient && !loadingGradient.classList.contains('hidden')) {
+            console.log('Safety net: Force hiding loading gradient');
+            loadingGradient.classList.add('hidden');
+          }
+        } catch (e) {
+          console.error('Safety net error:', e);
+        }
+      }, 8000); // 8 second absolute maximum
+      
+      try {
+        loadBackgroundImage();
+        showUserSelection(users);
+      } catch (error) {
+        console.error('App initialization error:', error);
+        // Hide loading gradient even if init fails
+        try {
+          document.getElementById('loadingGradient').classList.add('hidden');
+        } catch (e) {}
+      }
+    });
+
+    function loadBackgroundImage() {
+      const images = [
+        { url: 'assets/trees/Line-000001.png', webp: 'assets/trees/Line-000001.webp' },
+        { url: 'assets/trees/Line-000002.png', webp: 'assets/trees/Line-000002.webp' },
+        { url: 'assets/trees/Line-000003.png', webp: 'assets/trees/Line-000003.webp' },
+        { url: 'assets/trees/Line-000004.png', webp: 'assets/trees/Line-000004.webp' },
+        { url: 'assets/trees/Line-000005.png', webp: 'assets/trees/Line-000005.webp' },
+        { url: 'assets/trees/Line-000006.png', webp: 'assets/trees/Line-000006.webp' },
+        { url: 'assets/trees/Line-000007.png', webp: 'assets/trees/Line-000007.webp' },
+        { url: 'assets/trees/Line-000008.png', webp: 'assets/trees/Line-000008.webp' },
+        { url: 'assets/trees/Line-000009.png', webp: 'assets/trees/Line-000009.webp' },
+        { url: 'assets/trees/Line-000010.png', webp: 'assets/trees/Line-000010.webp' },
+        { url: 'assets/trees/Line-000011.png', webp: 'assets/trees/Line-000011.webp' },
+        { url: 'assets/trees/Line-000012.png', webp: 'assets/trees/Line-000012.webp' },
+        { url: 'assets/trees/Line-000013.png', webp: 'assets/trees/Line-000013.webp' }
+      ];
+      
+      const randomImage = images[Math.floor(Math.random() * images.length)];
+      const img = document.getElementById('backgroundImage');
+      const loadingGradient = document.getElementById('loadingGradient');
+      
+      // Try WebP first, fallback to PNG
+      const supportsWebP = document.createElement('canvas').toDataURL('image/webp').indexOf('data:image/webp') === 0;
+      img.src = supportsWebP && randomImage.webp ? randomImage.webp : randomImage.url;
+      
+      // Safety timeout to always hide loading gradient
+      const hideLoadingGradient = () => {
+        try {
+          loadingGradient.classList.add('hidden');
+          img.classList.add('loaded');
+        } catch (e) {
+          console.error('Error hiding loading gradient:', e);
+        }
+      };
+      
+      // Always hide loading after 5 seconds max
+      const safetyTimeout = setTimeout(hideLoadingGradient, 5000);
+      
+      img.onload = () => {
+        clearTimeout(safetyTimeout);
+        hideLoadingGradient();
+        // Add zoom animation on desktop
+        if (window.innerWidth > 768) {
+          setTimeout(() => {
+            try {
+              img.classList.add('animated');
+            } catch (e) {
+              console.error('Error adding animation:', e);
+            }
+          }, 500);
+        }
+      };
+      
+      img.onerror = () => {
+        // Fallback to PNG if WebP fails
+        if (img.src.includes('.webp')) {
+          console.log('WebP failed, trying PNG fallback');
+          img.src = randomImage.url;
+        } else {
+          // If PNG also fails, hide gradient anyway
+          console.log('Image loading failed, hiding gradient');
+          clearTimeout(safetyTimeout);
+          hideLoadingGradient();
+        }
+      };
+    }
+    
+    function showUserSelection(allUsers) {
+      const userSelectionDiv = document.getElementById('userSelection');
+      userSelectionDiv.innerHTML = '';
+
+      allUsers.forEach(u => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'avatar-option';
+
+        const img = document.createElement('img');
+        img.src = u.avatar;
+        img.alt = u.name;
+        img.className = 'avatar-image';
+
+        wrapper.onclick = () => {
+          document.querySelectorAll('.avatar-option').forEach(el => 
+            el.classList.remove('avatar-selected')
+          );
+          wrapper.classList.add('avatar-selected');
+          
+          myUuid = u.name;
+          document.getElementById('errorMessage').textContent = '';
+          
+          // Immediately join the call
+          setTimeout(() => joinCall(), 100);
+        };
+
+        wrapper.appendChild(img);
+        userSelectionDiv.appendChild(wrapper);
+      });
+    }
+
+    async function joinCall() {
+      if (!myUuid) {
+        document.getElementById('errorMessage').textContent = 'Please select an avatar!';
+        return;
+      }
+
+      try {
+        // Get camera/mic
+        localStream = await navigator.mediaDevices.getUserMedia({ 
+          video: true, 
+          audio: true 
+        });
+
+        // Initialize PeerJS with our username as ID
+        peer = new Peer(myUuid, {
+          config: {
+            iceServers: [
+              { urls: 'stun:stun.l.google.com:19302' },
+              { urls: 'stun:stun1.l.google.com:19302' }
+            ]
+          }
+        });
+
+        peer.on('open', async (id) => {
+          console.log('My peer ID is: ' + id);
+          
+          // Register in Firebase for discovery
+          await registerPeer(id);
+          
+          // Switch to video view
+          document.querySelector('.container').style.display = 'none';
+          const videoGrid = document.getElementById('videoGrid');
+          videoGrid.style.display = 'grid';
+          videoGrid.style.gridTemplateColumns = '1fr';
+
+          // Add local video
+          createVideoContainer(myUuid, localStream, true);
+          
+          // Get existing peers and call them
+          const existingPeers = await getActivePeers();
+          existingPeers.forEach(peerId => {
+            if (peerId !== myUuid) {
+              console.log('Calling peer:', peerId);
+              const call = peer.call(peerId, localStream);
+              handleCall(call, peerId);
+            }
+          });
+        });
+
+        // Handle incoming calls
+        peer.on('call', (call) => {
+          console.log('Incoming call from:', call.peer);
+          call.answer(localStream);
+          handleCall(call, call.peer);
+        });
+
+        peer.on('error', (err) => {
+          console.error('PeerJS error:', err);
+          document.getElementById('errorMessage').textContent = 'Connection error: ' + err.type;
+        });
+
+      } catch (err) {
+        console.error('Error:', err);
+        document.getElementById('errorMessage').textContent = 'Error: ' + err.message;
+      }
+    }
+
+    function handleCall(call, peerId) {
+      // Store the call
+      activeCalls.set(peerId, call);
+      
+      // Handle remote stream
+      call.on('stream', (remoteStream) => {
+        console.log('Received stream from:', peerId);
+        createVideoContainer(peerId, remoteStream, false);
+      });
+
+      // Handle call close
+      call.on('close', () => {
+        console.log('Call closed with:', peerId);
+        removeVideoContainer(peerId);
+        activeCalls.delete(peerId);
+      });
+
+      call.on('error', (err) => {
+        console.error('Call error with', peerId, ':', err);
+      });
+    }
+
+    async function registerPeer(peerId) {
+      try {
+        await database.ref(`peers/${peerId}`).set({
+          timestamp: Date.now(),
+          name: peerId
+        });
+        
+        // Clean up on disconnect
+        database.ref(`peers/${peerId}`).onDisconnect().remove();
+        
+        console.log('Registered in Firebase:', peerId);
+      } catch (error) {
+        console.error('Firebase registration error:', error);
+      }
+    }
+
+    async function getActivePeers() {
+      try {
+        const snapshot = await database.ref('peers').once('value');
+        const peers = snapshot.val() || {};
+        return Object.keys(peers).filter(id => id !== myUuid);
+      } catch (error) {
+        console.error('Error getting peers:', error);
+        return [];
+      }
+    }
+
+    function createVideoContainer(uuid, stream, isLocal) {
+      let container = document.getElementById(`video-${uuid}`);
+      
+      if (!container) {
+        container = document.createElement('div');
+        container.className = 'videoContainer';
+        container.id = `video-${uuid}`;
+
+        const video = document.createElement('video');
+        video.autoplay = true;
+        video.playsInline = true;
+        video.muted = isLocal; // Only mute local video
+
+        const label = document.createElement('div');
+        label.className = 'peerId';
+        const user = users.find(u => u.name === uuid);
+        label.textContent = user ? `${user.emoji} ${uuid}` : uuid;
+        if (isLocal) label.textContent += ' (You)';
+
+        container.appendChild(video);
+        container.appendChild(label);
+        
+        // Add mute button
+        const controls = document.createElement('div');
+        controls.className = 'video-controls';
+        
+        if (isLocal) {
+          const muteBtn = document.createElement('button');
+          muteBtn.className = 'control-btn';
+          muteBtn.innerHTML = '🎤';
+          muteBtn.onclick = () => {
+            const audioTrack = localStream.getAudioTracks()[0];
+            if (audioTrack) {
+              audioTrack.enabled = !audioTrack.enabled;
+              muteBtn.classList.toggle('muted');
+              muteBtn.innerHTML = audioTrack.enabled ? '🎤' : '🔇';
+            }
+          };
+          controls.appendChild(muteBtn);
+        } else {
+          // Mute button for remote users
+          const muteBtn = document.createElement('button');
+          muteBtn.className = 'control-btn';
+          muteBtn.innerHTML = '🔊';
+          muteBtn.title = 'Mute/Unmute ' + uuid;
+          muteBtn.onclick = () => {
+            const audioTracks = stream.getAudioTracks();
+            if (audioTracks.length > 0) {
+              const audioTrack = audioTracks[0];
+              audioTrack.enabled = !audioTrack.enabled;
+              muteBtn.classList.toggle('muted');
+              muteBtn.innerHTML = audioTrack.enabled ? '🔊' : '🔇';
+            }
+          };
+          controls.appendChild(muteBtn);
+        }
+        
+        // Add click to focus functionality
+        container.onclick = (e) => {
+          // Don't trigger on button clicks
+          if (e.target.tagName === 'BUTTON') return;
+          toggleFocus(uuid);
+        };
+        
+        container.appendChild(controls);
+        document.getElementById('videoGrid').appendChild(container);
+        
+        adjustGridLayout();
+        
+        // On mobile, auto-minimize local user after a delay
+        if (isMobile && isLocal && document.querySelectorAll('.videoContainer').length > 1) {
+          setTimeout(() => {
+            if (!focusedUser) {
+              adjustGridLayout();
+            }
+          }, 1000);
+        }
+      }
+
+      const video = container.querySelector('video');
+      video.srcObject = stream;
+    }
+
+    function removeVideoContainer(uuid) {
+      const container = document.getElementById(`video-${uuid}`);
+      if (container) {
+        container.remove();
+        adjustGridLayout();
+      }
+    }
+
+    function adjustGridLayout() {
+      if (focusedUser) {
+        setupFocusLayout();
+        return;
+      }
+      
+      const videoGrid = document.getElementById('videoGrid');
+      const containers = videoGrid.querySelectorAll('.videoContainer');
+      const containerCount = containers.length;
+      
+      // Reset all special classes and make all containers visible
+      containers.forEach(container => {
+        container.classList.remove('focused', 'minimized', 'thumbnail');
+        container.style.position = '';
+        container.style.top = '';
+        container.style.left = '';
+        container.style.right = '';
+        container.style.bottom = '';
+        container.style.width = '';
+        container.style.height = '';
+        container.style.zIndex = '';
+        container.style.display = 'block';
+      });
+      
+      // Remove thumbnail strip and move containers back to main grid
+      const existingStrip = document.querySelector('.thumbnail-strip');
+      if (existingStrip) {
+        // Move any containers from strip back to main grid
+        const strippedContainers = existingStrip.querySelectorAll('.videoContainer');
+        strippedContainers.forEach(container => {
+          videoGrid.appendChild(container);
+        });
+        existingStrip.remove();
+      }
+      
+      if (isMobile) {
+        setupMobileLayout(containers);
+      } else {
+        setupDesktopLayout(containerCount);
+      }
+    }
+    
+    function setupMobileLayout(containers) {
+      const videoGrid = document.getElementById('videoGrid');
+      const isPortrait = window.innerHeight > window.innerWidth;
+      
+      // Reset grid styles for mobile
+      videoGrid.style.display = 'block';
+      videoGrid.style.gridTemplateColumns = '';
+      videoGrid.style.gridTemplateRows = '';
+      videoGrid.style.gridGap = '';
+      
+      if (containers.length === 1) {
+        // Just local user
+        videoGrid.style.display = 'flex';
+        videoGrid.style.alignItems = 'center';
+        videoGrid.style.justifyContent = 'center';
+        return;
+      }
+      
+      // Find local user and make them small
+      const localContainer = document.getElementById(`video-${myUuid}`);
+      if (localContainer) {
+        localContainer.classList.add('minimized');
+      }
+      
+      // Other users take main area
+      const remoteContainers = Array.from(containers).filter(c => c.id !== `video-${myUuid}`);
+      
+      if (remoteContainers.length === 1) {
+        // One remote user - they get the main area
+        const mainContainer = remoteContainers[0];
+        mainContainer.style.position = 'fixed';
+        mainContainer.style.top = '10px';
+        mainContainer.style.left = '10px';
+        mainContainer.style.right = '10px';
+        mainContainer.style.bottom = '10px';
+        mainContainer.style.width = '';
+        mainContainer.style.height = '';
+      } else {
+        // Multiple remote users - split the screen
+        remoteContainers.forEach((container, index) => {
+          container.style.position = 'fixed';
+          container.style.zIndex = '150';
+          
+          if (isPortrait) {
+            // Split vertically
+            const height = `calc(${100 / remoteContainers.length}% - 20px)`;
+            container.style.top = `calc(${index * 100 / remoteContainers.length}% + 10px)`;
+            container.style.left = '10px';
+            container.style.right = '10px';
+            container.style.height = height;
+            container.style.width = '';
+          } else {
+            // Split horizontally (landscape)
+            const width = `calc(${100 / remoteContainers.length}% - 20px)`;
+            container.style.left = `calc(${index * 100 / remoteContainers.length}% + 10px)`;
+            container.style.top = '10px';
+            container.style.bottom = '10px';
+            container.style.width = width;
+            container.style.height = '';
+          }
+        });
+      }
+    }
+    
+    function setupDesktopLayout(containerCount) {
+      const videoGrid = document.getElementById('videoGrid');
+      videoGrid.style.display = 'grid';
+      videoGrid.style.alignItems = '';
+      videoGrid.style.justifyContent = '';
+      videoGrid.style.gridGap = '15px';
+      
+      if (containerCount === 1) {
+        videoGrid.style.gridTemplateColumns = '1fr';
+      } else if (containerCount === 2) {
+        videoGrid.style.gridTemplateColumns = 'repeat(2, 1fr)';
+      } else if (containerCount <= 4) {
+        videoGrid.style.gridTemplateColumns = 'repeat(2, 1fr)';
+        videoGrid.style.gridTemplateRows = 'repeat(2, 1fr)';
+      } else {
+        videoGrid.style.gridTemplateColumns = 'repeat(3, 1fr)';
+      }
+    }
+    
+    function setupFocusLayout() {
+      const videoGrid = document.getElementById('videoGrid');
+      
+      // First, ensure all containers are back in the main videoGrid
+      const allContainers = document.querySelectorAll('.videoContainer');
+      allContainers.forEach(container => {
+        if (container.parentNode !== videoGrid) {
+          videoGrid.appendChild(container);
+        }
+      });
+      
+      // Remove any existing thumbnail strip
+      const existingStrip = document.querySelector('.thumbnail-strip');
+      if (existingStrip) existingStrip.remove();
+      
+      const containers = videoGrid.querySelectorAll('.videoContainer');
+      const focusedContainer = document.getElementById(`video-${focusedUser}`);
+      const isPortrait = window.innerHeight > window.innerWidth;
+      
+      console.log('Focus layout - Total containers:', containers.length);
+      console.log('Focus layout - Focused user:', focusedUser);
+      console.log('Focus layout - Container IDs:', Array.from(containers).map(c => c.id));
+      
+      containers.forEach(container => {
+        container.classList.remove('focused', 'minimized', 'thumbnail');
+        container.style.position = '';
+        container.style.top = '';
+        container.style.left = '';
+        container.style.right = '';
+        container.style.bottom = '';
+        container.style.width = '';
+        container.style.height = '';
+        container.style.zIndex = '';
+        container.style.display = 'block';
+      });
+      
+      if (focusedContainer) {
+        focusedContainer.classList.add('focused');
+        
+        // Create thumbnail strip for ALL other users (including yourself)
+        const otherContainers = Array.from(containers).filter(c => c !== focusedContainer);
+        console.log('Other containers for thumbnails:', otherContainers.map(c => c.id));
+        
+        if (otherContainers.length > 0) {
+          const thumbnailStrip = document.createElement('div');
+          thumbnailStrip.className = 'thumbnail-strip';
+          
+          otherContainers.forEach((container, index) => {
+            container.classList.add('thumbnail');
+            
+            if (isMobile) {
+              if (isPortrait) {
+                // Bottom strip
+                container.style.position = 'static';
+              } else {
+                // Right side strip
+                container.style.position = 'static';
+              }
+              thumbnailStrip.appendChild(container);
+            } else {
+              // Desktop: position thumbnails around edges
+              container.style.position = 'fixed';
+              container.style.top = `${20 + index * 100}px`;
+              container.style.right = '20px';
+              container.style.width = '150px';
+              container.style.height = '100px';
+            }
+          });
+          
+          if (isMobile) {
+            document.getElementById('videoGrid').appendChild(thumbnailStrip);
+          }
+        }
+      }
+    }
+    
+    function toggleFocus(uuid) {
+      if (focusedUser === uuid) {
+        // Unfocus
+        focusedUser = null;
+      } else {
+        // Focus on this user
+        focusedUser = uuid;
+      }
+      adjustGridLayout();
+    }
+
+    // Handle orientation change
+    window.addEventListener('orientationchange', () => {
+      setTimeout(() => {
+        isMobile = window.innerWidth <= 768;
+        adjustGridLayout();
+      }, 500);
+    });
+    
+    // Handle window resize
+    window.addEventListener('resize', () => {
+      isMobile = window.innerWidth <= 768;
+      adjustGridLayout();
+    });
+    
+    // Cleanup on exit
+    window.addEventListener('beforeunload', () => {
+      if (peer) {
+        peer.destroy();
+      }
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+      }
+    });
+  </script>
+</body>
+</html>

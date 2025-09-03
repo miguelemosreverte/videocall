@@ -17,7 +17,18 @@ jobs:
     
     - name: Build Docker image
       run: |
-        docker build -t webp-conference:latest .
+        BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        BUILD_COMMIT=${{ github.sha }}
+        BUILD_BY="GitHub Actions"
+        BUILD_REF="${{ github.ref }}"
+        
+        docker build -t webp-conference:latest \
+          --build-arg BUILD_TIME="$BUILD_TIME" \
+          --build-arg BUILD_COMMIT="$BUILD_COMMIT" \
+          --build-arg BUILD_BY="$BUILD_BY" \
+          --build-arg BUILD_REF="$BUILD_REF" \
+          .
+        
         docker save webp-conference:latest | gzip > conference.tar.gz
     
     - name: Deploy to Hetzner

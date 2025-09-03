@@ -20,6 +20,14 @@ import (
     "github.com/nfnt/resize"
 )
 
+// Build-time variables (set via -ldflags)
+var (
+    BuildTime   = "unknown"
+    BuildCommit = "unknown"
+    BuildBy     = "local"
+    BuildRef    = "unknown"
+)
+
 // Audio processing constants
 const (
     // Echo cancellation parameters
@@ -801,6 +809,28 @@ func compressToWebP(data []byte, quality *QualityPreset) ([]byte, error) {
     return buf.Bytes(), nil
 }
 
+func handleHealth(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "application/json")
+    
+    health := map[string]interface{}{
+        "status": "healthy",
+        "deployment": map[string]string{
+            "time":      BuildTime,
+            "commit":    BuildCommit,
+            "deployedBy": BuildBy,
+            "ref":       BuildRef,
+        },
+        "server": map[string]interface{}{
+            "type":     "echo-free-conference",
+            "version":  "1.0.0",
+            "features": []string{"echo-cancellation", "VAD", "audio-ducking", "webp-compression"},
+        },
+        "timestamp": time.Now().UTC().Format(time.RFC3339),
+    }
+    
+    json.NewEncoder(w).Encode(health)
+}
+
 func main() {
     hub = &Hub{
         Rooms:      make(map[string]*Room),
@@ -863,8 +893,11 @@ func main() {
     })
     
     http.HandleFunc("/ws", handleWebSocket)
+    http.HandleFunc("/health", handleHealth)
+    http.HandleFunc("/info", handleHealth)
     
     log.Println("Starting Echo-Free Conference Server on :3001")
     log.Println("Features: Echo Cancellation | Feedback Prevention | Smart Audio Routing")
+    log.Printf("Build info: %s by %s (commit: %s)", BuildTime, BuildBy, BuildCommit)
     log.Fatal(http.ListenAndServe(":3001", nil))
 }

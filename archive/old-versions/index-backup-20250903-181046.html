@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Forest Friends Video Call - WebSocket Stream</title>
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      min-height: 100vh;
+      overflow: hidden;
+      position: relative;
+      background: linear-gradient(135deg, #87CEEB 0%, #98D98E 50%, #90EE90 100%);
+    }
+
+    .container {
+      position: relative;
+      z-index: 10;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .avatar-grid {
+      display: flex;
+      justify-content: center;
+      gap: 30px;
+      flex-wrap: wrap;
+    }
+
+    .avatar-option {
+      cursor: pointer;
+      transition: all 0.3s ease;
+      text-align: center;
+    }
+
+    .avatar-option:hover {
+      transform: translateY(-5px);
+    }
+
+    .avatar-image {
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 4px solid transparent;
+      transition: all 0.3s ease;
+      box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+    }
+
+    .avatar-option:hover .avatar-image {
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      border-color: #90EE90;
+    }
+
+    .avatar-selected .avatar-image {
+      border-color: #4a7c20 !important;
+      box-shadow: 0 0 0 3px rgba(74, 124, 32, 0.2);
+    }
+
+    .status-message {
+      margin-top: 20px;
+      padding: 10px 20px;
+      background: rgba(255,255,255,0.9);
+      border-radius: 10px;
+      font-size: 14px;
+    }
+
+    .error-message {
+      color: #d9534f;
+      text-align: center;
+      margin-top: 15px;
+      font-weight: 500;
+    }
+
+    /* Video grid */
+    #videoGrid {
+      display: none;
+      width: 100%;
+      height: 100vh;
+      background: rgba(0,0,0,0.8);
+      padding: 20px;
+      grid-gap: 15px;
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 100;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    }
+
+    .videoContainer {
+      position: relative;
+      background: #000;
+      border-radius: 15px;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    }
+
+    .videoContainer video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .peerId {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      color: white;
+      background: rgba(0,0,0,0.5);
+      padding: 5px 10px;
+      border-radius: 5px;
+      font-size: 14px;
+      z-index: 10;
+    }
+
+    .connection-status {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      padding: 5px 10px;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      border-radius: 5px;
+      font-size: 12px;
+    }
+
+    .status-good { background: rgba(0,128,0,0.7); }
+    .status-poor { background: rgba(255,165,0,0.7); }
+    .status-bad { background: rgba(255,0,0,0.7); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="avatar-grid" id="userSelection"></div>
+    <div class="status-message" id="statusMessage"></div>
+    <div class="error-message" id="errorMessage"></div>
+  </div>
+
+  <div id="videoGrid"></div>
+
+  <script>
+    // Firebase configuration
+    const firebaseConfig = {
+      apiKey: "AIzaSyCYZGxmEuqIuDzpmqCBfSkqY7r606xFnvM",
+      authDomain: "videocall-signalling.firebaseapp.com",
+      databaseURL: "https://videocall-signalling-default-rtdb.firebaseio.com",
+      projectId: "videocall-signalling",
+      storageBucket: "videocall-signalling.firebasestorage.app",
+      messagingSenderId: "1016443322452",
+      appId: "1:1016443322452:web:bfe5e3695f41721b5aedc1"
+    };
+    
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    const database = firebase.database();
+
+    const users = [
+      { name: "Miguel", avatar: "avatar-0.webp", emoji: "🦔" },
+      { name: "Anastasiia", avatar: "avatar-6.webp", emoji: "🐿️" },
+      { name: "Mariana", avatar: "avatar-5.webp", emoji: "🦜" }
+    ];
+
+    let myUuid = null;
+    let localStream = null;
+    let mediaRecorder = null;
+    let audioContext = null;
+    let audioProcessor = null;
+    let sequenceNumbers = new Map();
+    let chunkBuffers = new Map(); // Store chunks until we have enough for a segment
+
+    // Initialize
+    window.addEventListener('load', () => {
+      showUserSelection(users);
+      updateStatus('Select your avatar to join');
+    });
+    
+    function updateStatus(message) {
+      document.getElementById('statusMessage').textContent = message;
+    }
+
+    function showUserSelection(allUsers) {
+      const userSelectionDiv = document.getElementById('userSelection');
+      userSelectionDiv.innerHTML = '';
+
+      allUsers.forEach(u => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'avatar-option';
+
+        const img = document.createElement('img');
+        img.src = u.avatar;
+        img.alt = u.name;
+        img.className = 'avatar-image';
+
+        wrapper.onclick = () => {
+          document.querySelectorAll('.avatar-option').forEach(el => 
+            el.classList.remove('avatar-selected')
+          );
+          wrapper.classList.add('avatar-selected');
+          
+          myUuid = u.name;
+          document.getElementById('errorMessage').textContent = '';
+          updateStatus('Joining...');
+          
+          setTimeout(() => joinCall(), 100);
+        };
+
+        wrapper.appendChild(img);
+        userSelectionDiv.appendChild(wrapper);
+      });
+    }
+
+    async function joinCall() {
+      if (!myUuid) {
+        document.getElementById('errorMessage').textContent = 'Please select an avatar!';
+        return;
+      }
+
+      try {
+        updateStatus('Requesting camera and microphone...');
+        
+        // Get camera/mic with balanced settings
+        localStream = await navigator.mediaDevices.getUserMedia({ 
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 30 }
+          }, 
+          audio: true 
+        });
+
+        updateStatus('Starting video encoder...');
+
+        // Switch to video view
+        document.querySelector('.container').style.display = 'none';
+        const videoGrid = document.getElementById('videoGrid');
+        videoGrid.style.display = 'grid';
+
+        // Add local video
+        createVideoContainer(myUuid, localStream, true);
+
+        // Register with Firebase
+        await registerPeer(myUuid);
+        
+        // Listen for other peers first
+        listenForPeers();
+        
+        // Listen for incoming streams
+        listenForStreams();
+        
+        // Check for existing peers and create containers
+        const existingPeers = await getActivePeers();
+        console.log('Found existing peers:', existingPeers);
+        existingPeers.forEach(peerId => {
+          console.log('Creating video container for existing peer:', peerId);
+          // Create placeholder for existing peer
+          if (!document.getElementById(`video-${peerId}`)) {
+            createRemoteVideo(peerId);
+          }
+        });
+        
+        // Also check for any existing streams
+        const streamsSnapshot = await database.ref('streams').once('value');
+        const allStreams = streamsSnapshot.val() || {};
+        console.log('Existing streams in database:', Object.keys(allStreams));
+        
+        // Start streaming to Firebase
+        startStreaming();
+        // startAudioStreaming(); // Disabled for now
+        
+        updateStatus('Connected - Using WebSocket streaming');
+
+      } catch (err) {
+        console.error('Error:', err);
+        document.getElementById('errorMessage').textContent = 'Error: ' + err.message;
+        updateStatus('Failed to connect');
+      }
+    }
+
+    function startAudioStreaming() {
+      if (!localStream) return;
+      
+      const audioTrack = localStream.getAudioTracks()[0];
+      if (!audioTrack) {
+        console.log('No audio track available');
+        return;
+      }
+      
+      try {
+        // Use MediaRecorder to create playable audio segments
+        const audioStream = new MediaStream([audioTrack]);
+        const audioRecorder = new MediaRecorder(audioStream, {
+          mimeType: 'audio/webm;codecs=opus',
+          audioBitsPerSecond: 64000 // Higher bitrate for better quality
+        });
+        
+        let audioSequence = 0;
+        let audioChunks = [];
+        
+        audioRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            audioChunks.push(event.data);
+          }
+        };
+        
+        // Every 200ms, send accumulated audio as a playable segment
+        setInterval(async () => {
+          if (audioChunks.length > 0) {
+            // Combine all chunks into one blob
+            const audioBlob = new Blob(audioChunks, { type: 'audio/webm;codecs=opus' });
+            audioChunks = []; // Clear for next segment
+            
+            // Convert to base64
+            const reader = new FileReader();
+            reader.onloadend = async () => {
+              const dataUrl = reader.result;
+              const base64 = dataUrl.split(',')[1];
+              
+              if (!base64 || base64.length > 100000) {
+                console.warn('Audio segment issue:', base64 ? base64.length : 'no data');
+                return;
+              }
+              
+              const audioData = {
+                s: audioSequence++,
+                d: base64,
+                t: Date.now()
+              };
+              
+              // Send to all active peers except self
+              const activePeers = await getActivePeers();
+              for (const peerId of activePeers) {
+                if (peerId !== myUuid) {
+                  database.ref(`streams/${peerId}/audio_${myUuid}`).set(audioData)
+                    .catch(e => console.error(`Failed to send audio to ${peerId}:`, e));
+                }
+              }
+            };
+            reader.readAsDataURL(audioBlob);
+          }
+        }, 200);
+        
+        // Start recording continuous stream
+        audioRecorder.start();
+        console.log('Started audio streaming');
+        
+      } catch (e) {
+        console.error('Failed to start audio streaming:', e);
+      }
+    }
+    
+    function startStreaming() {
+      if (!localStream) return;
+
+      // Create a canvas to capture frames
+      const video = document.createElement('video');
+      video.srcObject = localStream;
+      video.play();
+      
+      // Balance quality and performance
+      const canvas = document.createElement('canvas');
+      canvas.width = 1280; // HD resolution, not Full HD for better performance
+      canvas.height = 720;
+      const ctx = canvas.getContext('2d', { 
+        alpha: false,
+        desynchronized: true, // Reduce latency
+        willReadFrequently: true
+      });
+      
+      let frameNumber = 0;
+      let isCapturing = false; // Prevent overlapping captures
+      
+      // Wait for video to be ready
+      video.onloadedmetadata = () => {
+        console.log('Video ready, starting HD frame capture');
+        
+        // Capture and send frames
+        const captureFrame = async () => {
+          if (!localStream.active || isCapturing) {
+            return; // Skip if already capturing
+          }
+          
+          isCapturing = true;
+          
+          try {
+            // Draw current frame to canvas
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // Convert canvas to base64
+            // Simple, fast encoding
+            let quality = 0.7; // Lower quality for faster encoding
+            let dataUrl = canvas.toDataURL('image/jpeg', quality);
+            let base64 = dataUrl.split(',')[1];
+            
+            // Only reduce if absolutely necessary
+            if (base64.length > 200000) {
+              quality = 0.5;
+              dataUrl = canvas.toDataURL('image/jpeg', quality);
+              base64 = dataUrl.split(',')[1];
+            }
+            
+            // Send frame to all peers
+            const frame = {
+              s: frameNumber++,  // Shorter key names to reduce data size
+              d: base64,
+              t: Date.now()
+            };
+            
+            const activePeers = await getActivePeers();
+            
+            // Send frames directly without waiting (skip self)
+            for (const peerId of activePeers) {
+              if (peerId !== myUuid) {
+                database.ref(`streams/${peerId}/frame_${myUuid}`).set(frame);
+              }
+            }
+          } catch (e) {
+            console.error('Error capturing frame:', e);
+          } finally {
+            isCapturing = false; // Always reset flag
+          }
+        };
+        
+        // Use setInterval for consistent timing
+        const captureInterval = setInterval(() => {
+          if (!localStream.active) {
+            clearInterval(captureInterval);
+            return;
+          }
+          captureFrame();
+        }, 40); // 25 FPS for good balance
+        
+        console.log('Started HD streaming at 25 FPS');
+      };
+    }
+
+    function listenForStreams() {
+      console.log(`Setting up stream listeners for ${myUuid}`);
+      
+      // Listen for incoming stream chunks
+      const streamRef = database.ref(`streams/${myUuid}`);
+      
+      streamRef.on('child_added', (snapshot) => {
+        const key = snapshot.key;
+        // Extract senderId from frame_Miguel or audio_Miguel format
+        let senderId = null;
+        if (key.startsWith('frame_')) {
+          senderId = key.replace('frame_', '');
+        } else if (key.startsWith('audio_')) {
+          senderId = key.replace('audio_', '');
+        } else {
+          return; // Unknown format
+        }
+        
+        console.log(`New stream detected from ${senderId}`);
+        if (senderId === myUuid) return;
+        
+        // Skip listening to self
+        if (senderId === myUuid) return;
+        
+        // Listen for video frames from this sender
+        const frameRef = database.ref(`streams/${myUuid}/frame_${senderId}`);
+        frameRef.on('value', (frameSnapshot) => {
+          const frame = frameSnapshot.val();
+          if (frame && frame.d) {
+            handleIncomingFrame(senderId, frame);
+          }
+        });
+        
+        // Listen for audio chunks from this sender (skip self)
+        if (senderId !== myUuid) {
+          const audioRef = database.ref(`streams/${myUuid}/audio_${senderId}`);
+          audioRef.on('value', (audioSnapshot) => {
+            const audioChunk = audioSnapshot.val();
+            if (audioChunk && audioChunk.d) {
+              handleIncomingAudio(senderId, audioChunk);
+            }
+          });
+        }
+      });
+      
+      // Also check for any existing streams
+      streamRef.once('value', (snapshot) => {
+        const streams = snapshot.val();
+        if (streams) {
+          Object.keys(streams).forEach(senderId => {
+            if (senderId !== myUuid) {
+              console.log(`Found existing stream from ${senderId}`);
+              // Skip self
+              if (senderId === myUuid) return;
+              
+              const frameRef = database.ref(`streams/${myUuid}/frame_${senderId}`);
+              frameRef.on('value', (frameSnapshot) => {
+                const frame = frameSnapshot.val();
+                if (frame && frame.d) {
+                  handleIncomingFrame(senderId, frame);
+                }
+              });
+              
+              // Only listen to audio from others
+              if (senderId !== myUuid) {
+                const audioRef = database.ref(`streams/${myUuid}/audio_${senderId}`);
+                audioRef.on('value', (audioSnapshot) => {
+                  const audioChunk = audioSnapshot.val();
+                  if (audioChunk && audioChunk.d) {
+                    handleIncomingAudio(senderId, audioChunk);
+                  }
+                });
+              }
+            }
+          });
+        }
+      });
+    }
+
+    // Store audio elements for each sender
+    const audioElements = new Map();
+    const audioQueues = new Map();
+    
+    function handleIncomingAudio(senderId, audioChunk) {
+      // Don't play your own audio
+      if (senderId === myUuid) {
+        console.log('Skipping own audio');
+        return;
+      }
+      
+      try {
+        // Get or create audio element for this sender
+        let audio = audioElements.get(senderId);
+        if (!audio) {
+          audio = document.createElement('audio');
+          audio.autoplay = true;
+          audio.style.display = 'none';
+          
+          // Check if user has already muted this sender
+          const muteBtn = document.querySelector(`#video-${senderId} .control-btn`);
+          if (muteBtn && muteBtn.classList.contains('muted')) {
+            audio.muted = true;
+          }
+          
+          document.body.appendChild(audio);
+          audioElements.set(senderId, audio);
+          audioQueues.set(senderId, []);
+          
+          // Set up ended handler once
+          audio.onended = () => {
+            const q = audioQueues.get(senderId);
+            if (q && q.length > 0) {
+              const nextSegment = q.shift();
+              audio.src = nextSegment;
+              audio.play().catch(e => console.log('Queue playback failed:', e));
+            }
+          };
+        }
+        
+        // Create audio URL from base64
+        const audioUrl = `data:audio/webm;base64,${audioChunk.d || audioChunk.data}`;
+        
+        // Add to queue
+        const queue = audioQueues.get(senderId);
+        queue.push(audioUrl);
+        
+        // If audio is not playing and we have segments, start playing
+        if ((audio.paused || audio.ended) && queue.length > 0) {
+          const nextSegment = queue.shift();
+          audio.src = nextSegment;
+          audio.play().catch(e => {
+            console.log('Audio playback failed:', e);
+            // Don't try muted audio - that defeats the purpose
+          });
+        }
+        
+      } catch (e) {
+        console.error('Failed to handle audio:', e);
+      }
+    }
+    
+    function handleIncomingFrame(senderId, frame) {
+      // Don't display your own video feed from Firebase
+      if (senderId === myUuid) {
+        console.log('Skipping own frame');
+        return;
+      }
+      
+      // Create video container if doesn't exist
+      if (!document.getElementById(`video-${senderId}`)) {
+        createRemoteVideo(senderId);
+      }
+      
+      // Decode and display frame as image
+      try {
+        const container = document.getElementById(`video-${senderId}`);
+        if (!container) return;
+        
+        // Find or create img element for streaming frames
+        let img = container.querySelector('img.video-frame');
+        if (!img) {
+          // Hide the video element and replace with img
+          const video = container.querySelector('video');
+          if (video) {
+            video.style.display = 'none';
+          }
+          
+          img = document.createElement('img');
+          img.className = 'video-frame';
+          img.style.width = '100%';
+          img.style.height = '100%';
+          img.style.objectFit = 'cover';
+          img.style.position = 'absolute';
+          img.style.top = '0';
+          img.style.left = '0';
+          container.appendChild(img);
+        }
+        
+        // Use the shortened key names (d for data, s for sequence)
+        const data = frame.d || frame.data;
+        const sequence = frame.s !== undefined ? frame.s : frame.sequence;
+        
+        if (!data) {
+          console.error('No data in frame:', frame);
+          return;
+        }
+        
+        // Directly set the image as data URL (always JPEG)
+        img.src = `data:image/jpeg;base64,${data}`;
+        
+        // Update connection status to show frame received
+        const status = container.querySelector('.connection-status');
+        if (status) {
+          status.textContent = `Frame ${sequence}`;
+        }
+      } catch (e) {
+        console.error('Failed to display frame:', e);
+      }
+    }
+    
+    function handleIncomingChunk(senderId, chunk) {
+      console.log(`Received chunk ${chunk.sequence} from ${senderId}`);
+      
+      // Check sequence number to avoid duplicates
+      const lastSequence = sequenceNumbers.get(senderId) || -1;
+      if (chunk.sequence <= lastSequence) {
+        console.log(`Skipping duplicate chunk ${chunk.sequence}`);
+        return;
+      }
+      sequenceNumbers.set(senderId, chunk.sequence);
+
+      // Create video element if doesn't exist
+      if (!document.getElementById(`video-${senderId}`)) {
+        createRemoteVideo(senderId);
+      }
+
+      // Initialize buffer for this sender if needed
+      if (!chunkBuffers.has(senderId)) {
+        chunkBuffers.set(senderId, {
+          chunks: [],
+          lastUpdate: 0
+        });
+      }
+
+      // Decode chunk
+      let bytes;
+      try {
+        const binaryData = atob(chunk.data);
+        bytes = new Uint8Array(binaryData.length);
+        for (let i = 0; i < binaryData.length; i++) {
+          bytes[i] = binaryData.charCodeAt(i);
+        }
+      } catch (e) {
+        console.error('Failed to decode base64 chunk:', e);
+        console.error('Chunk info:', {
+          size: chunk.size,
+          dataLength: chunk.data ? chunk.data.length : 0,
+          preview: chunk.data ? chunk.data.substring(0, 100) : 'null',
+          sequence: chunk.sequence
+        });
+        return;
+      }
+      
+      // Add to buffer
+      const buffer = chunkBuffers.get(senderId);
+      buffer.chunks.push(bytes);
+      
+      // Every 2 seconds worth of chunks (4 chunks at 500ms each), create a playable segment
+      if (buffer.chunks.length >= 4) {
+        // Combine all chunks into one blob
+        const combinedLength = buffer.chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+        const combined = new Uint8Array(combinedLength);
+        let offset = 0;
+        for (const chunk of buffer.chunks) {
+          combined.set(chunk, offset);
+          offset += chunk.length;
+        }
+        
+        // Create blob and play
+        const blob = new Blob([combined], { type: chunk.mimeType || 'video/webm' });
+        const video = document.querySelector(`#video-${senderId} video`);
+        
+        if (video) {
+          const url = URL.createObjectURL(blob);
+          
+          // Only update if enough time has passed (prevent interrupting current playback)
+          const now = Date.now();
+          if (now - buffer.lastUpdate > 1500) {
+            video.src = url;
+            video.play().catch(e => {
+              console.log('Play failed, trying muted:', e);
+              video.muted = true;
+              video.play().catch(e2 => console.error('Still cannot play:', e2));
+            });
+            buffer.lastUpdate = now;
+          }
+          
+          // Clean up
+          setTimeout(() => URL.revokeObjectURL(url), 10000);
+        }
+        
+        // Clear buffer for next segment
+        buffer.chunks = [];
+      }
+    }
+
+
+    function createRemoteVideo(senderId) {
+      const container = document.createElement('div');
+      container.className = 'videoContainer';
+      container.id = `video-${senderId}`;
+
+      // Create placeholder video element (will be hidden when frames arrive)
+      const video = document.createElement('video');
+      video.autoplay = true;
+      video.playsInline = true;
+      video.muted = false;
+
+      const label = document.createElement('div');
+      label.className = 'peerId';
+      const user = users.find(u => u.name === senderId);
+      label.textContent = user ? `${user.emoji} ${senderId}` : senderId;
+
+      const status = document.createElement('div');
+      status.className = 'connection-status status-good';
+      status.textContent = 'Waiting for frames...';
+
+      // Add mute controls for remote audio
+      const controls = document.createElement('div');
+      controls.className = 'video-controls';
+      
+      const muteBtn = document.createElement('button');
+      muteBtn.className = 'control-btn';
+      muteBtn.innerHTML = '🔊';
+      muteBtn.title = `Mute/Unmute ${senderId}'s audio`;
+      muteBtn.onclick = () => {
+        // Mute the audio element for this user
+        const audio = audioElements.get(senderId);
+        if (audio) {
+          audio.muted = !audio.muted;
+          muteBtn.classList.toggle('muted');
+          muteBtn.innerHTML = audio.muted ? '🔇' : '🔊';
+        } else {
+          // If no audio element yet, store mute preference
+          muteBtn.classList.toggle('muted');
+          muteBtn.innerHTML = muteBtn.classList.contains('muted') ? '🔇' : '🔊';
+        }
+      };
+      
+      controls.appendChild(muteBtn);
+      container.appendChild(controls);
+
+      container.appendChild(video);
+      container.appendChild(label);
+      container.appendChild(status);
+      
+      document.getElementById('videoGrid').appendChild(container);
+      console.log(`Created video container for ${senderId}`);
+    }
+
+    function createVideoContainer(uuid, stream, isLocal) {
+      const container = document.createElement('div');
+      container.className = 'videoContainer';
+      container.id = `video-${uuid}`;
+
+      const video = document.createElement('video');
+      video.autoplay = true;
+      video.playsInline = true;
+      video.muted = isLocal;
+      video.srcObject = stream;
+
+      const label = document.createElement('div');
+      label.className = 'peerId';
+      const user = users.find(u => u.name === uuid);
+      label.textContent = user ? `${user.emoji} ${uuid}` : uuid;
+      if (isLocal) label.textContent += ' (You)';
+
+      const status = document.createElement('div');
+      status.className = 'connection-status status-good';
+      status.textContent = isLocal ? 'Local' : 'WebSocket Stream';
+
+      // Add mute controls
+      const controls = document.createElement('div');
+      controls.className = 'video-controls';
+      
+      const muteBtn = document.createElement('button');
+      muteBtn.className = 'control-btn';
+      
+      if (isLocal) {
+        // Mute button for local user (mute microphone)
+        muteBtn.innerHTML = '🎤';
+        muteBtn.title = 'Mute/Unmute microphone';
+        muteBtn.onclick = () => {
+          const audioTrack = stream.getAudioTracks()[0];
+          if (audioTrack) {
+            audioTrack.enabled = !audioTrack.enabled;
+            muteBtn.classList.toggle('muted');
+            muteBtn.innerHTML = audioTrack.enabled ? '🎤' : '🔇';
+          }
+        };
+      } else {
+        // Mute button for remote user (mute speaker)
+        muteBtn.innerHTML = '🔊';
+        muteBtn.title = `Mute/Unmute ${uuid}`;
+        muteBtn.onclick = () => {
+          video.muted = !video.muted;
+          muteBtn.classList.toggle('muted');
+          muteBtn.innerHTML = video.muted ? '🔇' : '🔊';
+        };
+      }
+      
+      controls.appendChild(muteBtn);
+      container.appendChild(controls);
+
+      container.appendChild(video);
+      container.appendChild(label);
+      container.appendChild(status);
+      
+      document.getElementById('videoGrid').appendChild(container);
+    }
+
+    async function registerPeer(peerId) {
+      await database.ref(`peers/${peerId}`).set({
+        timestamp: Date.now(),
+        name: peerId
+      });
+      
+      // Clean up on disconnect
+      database.ref(`peers/${peerId}`).onDisconnect().remove();
+      database.ref(`streams/${peerId}`).onDisconnect().remove();
+    }
+
+    async function getActivePeers() {
+      const snapshot = await database.ref('peers').once('value');
+      const peers = snapshot.val() || {};
+      const activePeers = Object.keys(peers).filter(id => id !== myUuid);
+      return activePeers;
+    }
+
+    function listenForPeers() {
+      database.ref('peers').on('child_added', (snapshot) => {
+        const peerId = snapshot.key;
+        if (peerId !== myUuid) {
+          console.log('New peer joined:', peerId);
+        }
+      });
+
+      database.ref('peers').on('child_removed', (snapshot) => {
+        const peerId = snapshot.key;
+        console.log('Peer left:', peerId);
+        const container = document.getElementById(`video-${peerId}`);
+        if (container) container.remove();
+      });
+    }
+
+    // Cleanup on exit
+    window.addEventListener('beforeunload', () => {
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+      }
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+      }
+    });
+  </script>
+</body>
+</html>

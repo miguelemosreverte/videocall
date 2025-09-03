@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebP Video Conference - Optimized</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            width: 90%;
+            max-width: 1400px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .status {
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+        
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .status.connecting {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeeba;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        button.primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        button.primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102,126,234,0.4);
+        }
+        
+        button.secondary {
+            background: #6c757d;
+            color: white;
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-card {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            padding: 15px;
+            border-radius: 10px;
+            color: white;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            opacity: 0.9;
+            text-transform: uppercase;
+        }
+        
+        .videos {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        
+        .video-container {
+            position: relative;
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            aspect-ratio: 4/3;
+        }
+        
+        .video-container video,
+        .video-container img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .video-label {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        
+        .remote-videos {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+        }
+        
+        .audio-indicator {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: rgba(76, 175, 80, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .audio-indicator.active {
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.7; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                width: 95%;
+                padding: 20px;
+            }
+            
+            .videos {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎥 WebP Conference (Audio Fixed)</h1>
+        
+        <div id="status" class="status disconnected">
+            📡 Ready to connect to VPS
+        </div>
+        
+        <div class="controls">
+            <button class="primary" onclick="startConference()">Join Conference</button>
+            <button class="secondary" onclick="disconnect()">Leave</button>
+            <button class="secondary" onclick="toggleAudio()">🔇 Mute</button>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="compression">0x</div>
+                <div class="stat-label">WebP Compression</div>
+            </div>
+            <div class="stat-card" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);">
+                <div class="stat-value" id="bandwidth">0</div>
+                <div class="stat-label">kbps Used</div>
+            </div>
+            <div class="stat-card" style="background: linear-gradient(135deg, #30cfd0 0%, #330867 100%);">
+                <div class="stat-value" id="fps">0</div>
+                <div class="stat-label">FPS</div>
+            </div>
+            <div class="stat-card" style="background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);">
+                <div class="stat-value" id="users">1</div>
+                <div class="stat-label">Users</div>
+            </div>
+        </div>
+        
+        <div class="videos">
+            <div>
+                <h3>Your Video</h3>
+                <div class="video-container">
+                    <video id="localVideo" autoplay muted playsinline></video>
+                    <div class="video-label">You</div>
+                    <div class="audio-indicator" id="localAudioIndicator">🎤</div>
+                </div>
+            </div>
+            <div>
+                <h3>Other Participants</h3>
+                <div id="remoteVideos" class="remote-videos"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // VPS WebSocket endpoint with WebP compression
+        const WS_URL = 'wss://194.87.103.57.nip.io/ws';
+        
+        let ws = null;
+        let localStream = null;
+        let userId = 'user-' + Math.random().toString(36).substr(2, 9);
+        let roomId = 'conference-room';
+        let isConnected = false;
+        let audioMuted = false;
+        
+        // Stats tracking
+        let frameCount = 0;
+        let bytesSent = 0;
+        let bytesReceived = 0;
+        let lastStatsUpdate = Date.now();
+        let compressionRatios = [];
+        let remoteUsers = new Set();
+        
+        // Audio handling - FIXED!
+        let audioContext = null;
+        let audioProcessor = null;
+        let remoteAudioBuffers = {};
+        let audioWorkletNode = null;
+        
+        async function startConference() {
+            updateStatus('connecting', '🔄 Connecting to VPS...');
+            
+            try {
+                // Get user media with lower resolution for faster performance
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: { ideal: 320, max: 640 },
+                        height: { ideal: 240, max: 480 },
+                        frameRate: { ideal: 15, max: 30 }
+                    },
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true,
+                        sampleRate: 16000  // Lower sample rate for smaller data
+                    }
+                });
+                
+                document.getElementById('localVideo').srcObject = localStream;
+                
+                // Initialize audio context for playback
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                
+                // Setup audio processing for sending
+                setupAudioSending();
+                
+                // Connect to WebSocket
+                connectWebSocket();
+                
+            } catch (err) {
+                console.error('Media error:', err);
+                updateStatus('disconnected', '❌ Camera/mic access denied');
+            }
+        }
+        
+        function connectWebSocket() {
+            ws = new WebSocket(WS_URL);
+            ws.binaryType = 'arraybuffer';
+            
+            ws.onopen = () => {
+                isConnected = true;
+                updateStatus('connected', '✅ Connected to VPS (Audio Fixed!)');
+                
+                // Send join message
+                ws.send(JSON.stringify({
+                    type: 'join',
+                    id: userId,
+                    room: roomId
+                }));
+                
+                // Start streaming
+                startStreaming();
+            };
+            
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                bytesReceived += event.data.length;
+                
+                switch(msg.type) {
+                    case 'welcome':
+                        console.log('Joined room successfully');
+                        break;
+                        
+                    case 'video-frame':
+                        if (msg.from && msg.from !== userId) {
+                            displayRemoteVideo(msg.from, msg.data, msg.frameSize, msg.compressionType);
+                            remoteUsers.add(msg.from);
+                        }
+                        break;
+                        
+                    case 'audio-chunk':
+                        if (msg.from && msg.from !== userId) {
+                            playRemoteAudio(msg.from, msg.data);
+                            remoteUsers.add(msg.from);
+                        }
+                        break;
+                }
+                
+                updateStats();
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                updateStatus('disconnected', '❌ Connection error');
+            };
+            
+            ws.onclose = () => {
+                isConnected = false;
+                updateStatus('disconnected', '🔌 Disconnected from VPS');
+                stopStreaming();
+            };
+        }
+        
+        function startStreaming() {
+            if (!localStream) return;
+            
+            const video = document.getElementById('localVideo');
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            canvas.width = 320;
+            canvas.height = 240;
+            
+            // Video streaming at 10 FPS for better performance
+            const videoInterval = setInterval(() => {
+                if (!isConnected || !ws || ws.readyState !== WebSocket.OPEN) {
+                    clearInterval(videoInterval);
+                    return;
+                }
+                
+                ctx.drawImage(video, 0, 0, 320, 240);
+                
+                // Convert to JPEG with lower quality for faster transmission
+                canvas.toBlob((blob) => {
+                    if (!blob) return;
+                    
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        const base64 = reader.result.split(',')[1];
+                        
+                        const message = {
+                            type: 'video-frame',
+                            data: base64,
+                            timestamp: Date.now(),
+                            seq: frameCount++
+                        };
+                        
+                        const data = JSON.stringify(message);
+                        ws.send(data);
+                        bytesSent += data.length;
+                    };
+                    reader.readAsDataURL(blob);
+                }, 'image/jpeg', 0.6);  // Lower quality for faster encoding
+                
+            }, 100); // 10 FPS for smoother performance
+            
+            // Store interval for cleanup
+            window.videoStreamInterval = videoInterval;
+        }
+        
+        function setupAudioSending() {
+            if (!localStream) return;
+            
+            const audioTrack = localStream.getAudioTracks()[0];
+            if (!audioTrack) return;
+            
+            const mediaStreamSource = audioContext.createMediaStreamSource(localStream);
+            const processor = audioContext.createScriptProcessor(2048, 1, 1);
+            
+            processor.onaudioprocess = (e) => {
+                if (!isConnected || !ws || ws.readyState !== WebSocket.OPEN || audioMuted) return;
+                
+                const inputData = e.inputBuffer.getChannelData(0);
+                
+                // Convert float32 to int16
+                const pcm16 = new Int16Array(inputData.length);
+                for (let i = 0; i < inputData.length; i++) {
+                    const s = Math.max(-1, Math.min(1, inputData[i]));
+                    pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                }
+                
+                // Convert to base64
+                const base64 = btoa(String.fromCharCode(...new Uint8Array(pcm16.buffer)));
+                
+                // Send audio chunk
+                ws.send(JSON.stringify({
+                    type: 'audio-chunk',
+                    data: base64,
+                    timestamp: Date.now(),
+                    samples: pcm16.length
+                }));
+                
+                bytesSent += base64.length;
+                
+                // Animate audio indicator
+                const indicator = document.getElementById('localAudioIndicator');
+                if (indicator) {
+                    indicator.classList.add('active');
+                    setTimeout(() => indicator.classList.remove('active'), 100);
+                }
+            };
+            
+            mediaStreamSource.connect(processor);
+            processor.connect(audioContext.destination);
+            audioProcessor = processor;
+        }
+        
+        function playRemoteAudio(userId, audioData) {
+            if (!audioContext) return;
+            
+            try {
+                // Decode base64 to ArrayBuffer
+                const binaryString = atob(audioData);
+                const len = binaryString.length;
+                const bytes = new Uint8Array(len);
+                for (let i = 0; i < len; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                
+                // Convert int16 to float32
+                const int16Array = new Int16Array(bytes.buffer);
+                const float32Array = new Float32Array(int16Array.length);
+                for (let i = 0; i < int16Array.length; i++) {
+                    float32Array[i] = int16Array[i] / 32768.0;
+                }
+                
+                // Create audio buffer
+                const audioBuffer = audioContext.createBuffer(1, float32Array.length, audioContext.sampleRate);
+                audioBuffer.getChannelData(0).set(float32Array);
+                
+                // Play the audio
+                const source = audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioContext.destination);
+                source.start();
+                
+                // Animate remote audio indicator
+                const indicator = document.getElementById(`audio-${userId}`);
+                if (indicator) {
+                    indicator.classList.add('active');
+                    setTimeout(() => indicator.classList.remove('active'), 100);
+                }
+                
+            } catch (err) {
+                console.error('Audio playback error:', err);
+            }
+        }
+        
+        function displayRemoteVideo(userId, frameData, frameSize, compressionType) {
+            let container = document.getElementById(`remote-${userId}`);
+            
+            if (!container) {
+                container = document.createElement('div');
+                container.className = 'video-container';
+                container.id = `remote-${userId}`;
+                container.innerHTML = `
+                    <img id="frame-${userId}" alt="Remote video">
+                    <div class="video-label">${userId}</div>
+                    <div class="audio-indicator" id="audio-${userId}">🔊</div>
+                `;
+                document.getElementById('remoteVideos').appendChild(container);
+            }
+            
+            const img = document.getElementById(`frame-${userId}`);
+            if (img) {
+                // Display WebP compressed frame
+                const mimeType = compressionType === 'webp' ? 'image/webp' : 'image/jpeg';
+                img.src = `data:${mimeType};base64,${frameData}`;
+                
+                // Track compression ratio
+                if (frameSize && compressionType === 'webp') {
+                    const originalSize = 25000; // Approximate JPEG size
+                    const ratio = originalSize / frameSize;
+                    compressionRatios.push(ratio);
+                    if (compressionRatios.length > 10) compressionRatios.shift();
+                }
+            }
+        }
+        
+        function toggleAudio() {
+            audioMuted = !audioMuted;
+            const btn = event.target;
+            btn.textContent = audioMuted ? '🔊 Unmute' : '🔇 Mute';
+            
+            if (localStream) {
+                localStream.getAudioTracks().forEach(track => {
+                    track.enabled = !audioMuted;
+                });
+            }
+        }
+        
+        function updateStats() {
+            const now = Date.now();
+            const elapsed = (now - lastStatsUpdate) / 1000;
+            
+            if (elapsed >= 1) {
+                // Compression ratio
+                if (compressionRatios.length > 0) {
+                    const avg = compressionRatios.reduce((a, b) => a + b, 0) / compressionRatios.length;
+                    document.getElementById('compression').textContent = avg.toFixed(1) + 'x';
+                }
+                
+                // Bandwidth
+                const kbps = ((bytesSent + bytesReceived) * 8 / elapsed / 1000).toFixed(0);
+                document.getElementById('bandwidth').textContent = kbps;
+                
+                // FPS
+                const fps = (frameCount / elapsed).toFixed(1);
+                document.getElementById('fps').textContent = fps;
+                
+                // Users
+                document.getElementById('users').textContent = remoteUsers.size + 1;
+                
+                // Reset counters
+                bytesSent = 0;
+                bytesReceived = 0;
+                frameCount = 0;
+                lastStatsUpdate = now;
+            }
+        }
+        
+        function stopStreaming() {
+            if (window.videoStreamInterval) {
+                clearInterval(window.videoStreamInterval);
+            }
+            
+            if (audioProcessor) {
+                audioProcessor.disconnect();
+                audioProcessor = null;
+            }
+            
+            if (audioContext && audioContext.state !== 'closed') {
+                audioContext.close();
+                audioContext = null;
+            }
+        }
+        
+        function disconnect() {
+            stopStreaming();
+            
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+            
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+                document.getElementById('localVideo').srcObject = null;
+            }
+            
+            document.getElementById('remoteVideos').innerHTML = '';
+            remoteUsers.clear();
+            
+            updateStatus('disconnected', '📡 Ready to connect to VPS');
+        }
+        
+        function updateStatus(type, message) {
+            const status = document.getElementById('status');
+            status.className = 'status ' + type;
+            status.textContent = message;
+        }
+        
+        // Update stats every second
+        setInterval(updateStats, 1000);
+        
+        // Clean up on page unload
+        window.addEventListener('beforeunload', () => {
+            disconnect();
+        });
+    </script>
+</body>
+</html>

@@ -4,7 +4,17 @@ echo "🚀 Building and deploying conference server with echo cancellation..."
 
 # Build Docker image
 echo "📦 Building Docker image..."
-docker build -t webp-conference:latest .
+BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+BUILD_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+BUILD_BY="Manual Deploy"
+BUILD_REF=$(git branch --show-current 2>/dev/null || echo "unknown")
+
+docker build -t webp-conference:latest \
+  --build-arg BUILD_TIME="$BUILD_TIME" \
+  --build-arg BUILD_COMMIT="$BUILD_COMMIT" \
+  --build-arg BUILD_BY="$BUILD_BY" \
+  --build-arg BUILD_REF="$BUILD_REF" \
+  .
 
 # Save image
 echo "💾 Saving Docker image..."

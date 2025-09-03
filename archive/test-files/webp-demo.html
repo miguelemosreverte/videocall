@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebP Conference Demo</title>
+    <style>
+        body { font-family: Arial; padding: 20px; background: #f0f0f0; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; }
+        h1 { color: #333; }
+        .status { 
+            padding: 10px; 
+            margin: 10px 0; 
+            border-radius: 5px; 
+            background: #e7f3ff; 
+            border: 1px solid #2196F3;
+        }
+        .videos { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 10px; margin: 20px 0; }
+        video { width: 100%; border-radius: 5px; background: #000; }
+        .stats { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
+            gap: 10px; 
+            margin: 20px 0;
+        }
+        .stat-card {
+            padding: 15px;
+            border-radius: 5px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .stat-value { font-size: 2em; font-weight: bold; }
+        .stat-label { opacity: 0.9; margin-top: 5px; }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+            background: #4CAF50;
+            color: white;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover { background: #45a049; }
+        .warning { 
+            background: #fff3cd; 
+            border: 1px solid #ffc107; 
+            color: #856404;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎥 WebP Conference Demo</h1>
+        
+        <div class="status" id="status">
+            📡 Ready to connect
+        </div>
+
+        <div class="warning">
+            ⚠️ Using localhost server. For production, change serverURL to your VPS address.
+        </div>
+
+        <div>
+            <input type="text" id="roomId" placeholder="Room ID" value="demo-room">
+            <input type="text" id="userId" placeholder="Your Name" value="user-1">
+            <button onclick="connect()">Join Conference</button>
+            <button onclick="disconnect()">Leave</button>
+        </div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="compression">0x</div>
+                <div class="stat-label">WebP Compression</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="bandwidth">0</div>
+                <div class="stat-label">Bandwidth (kbps)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="fps">0</div>
+                <div class="stat-label">FPS</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="participants">0</div>
+                <div class="stat-label">Participants</div>
+            </div>
+        </div>
+
+        <div class="videos">
+            <div>
+                <h3>Local Video</h3>
+                <video id="localVideo" autoplay muted></video>
+            </div>
+            <div>
+                <h3>Remote Streams</h3>
+                <div id="remoteVideos"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let localStream = null;
+        let userId = '';
+        let roomId = '';
+        let frameCount = 0;
+        let bytesSent = 0;
+        let bytesRecv = 0;
+        let compressionRatios = [];
+        let lastStatsTime = Date.now();
+        let participants = new Set();
+
+        // Change this to your VPS address for production
+        const serverURL = 'ws://localhost:3001/ws';
+
+        async function connect() {
+            userId = document.getElementById('userId').value;
+            roomId = document.getElementById('roomId').value;
+
+            if (!userId || !roomId) {
+                alert('Please enter room ID and name');
+                return;
+            }
+
+            // Get user media
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 320, height: 240 },
+                    audio: true
+                });
+                document.getElementById('localVideo').srcObject = localStream;
+            } catch (err) {
+                console.error('Failed to get media:', err);
+                document.getElementById('status').textContent = '❌ Camera/mic access denied';
+                return;
+            }
+
+            // Connect to WebSocket
+            ws = new WebSocket(serverURL);
+            
+            ws.onopen = () => {
+                document.getElementById('status').textContent = '✅ Connected to server';
+                
+                // Send join message
+                ws.send(JSON.stringify({
+                    type: 'join',
+                    id: userId,
+                    room: roomId
+                }));
+
+                participants.add(userId);
+                updateStats();
+                
+                // Start sending video/audio
+                startStreaming();
+            };
+
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                bytesRecv += event.data.length;
+
+                switch(msg.type) {
+                    case 'welcome':
+                        document.getElementById('status').textContent = `✅ Joined room: ${roomId}`;
+                        break;
+                    
+                    case 'video-frame':
+                        if (msg.from && msg.from !== userId) {
+                            participants.add(msg.from);
+                            displayRemoteFrame(msg.from, msg.data, msg.frameSize);
+                            
+                            if (msg.compressionType === 'webp' && msg.frameSize) {
+                                // Estimate compression ratio (original ~25KB JPEG to WebP)
+                                const ratio = 25000 / msg.frameSize;
+                                compressionRatios.push(ratio);
+                                if (compressionRatios.length > 10) compressionRatios.shift();
+                            }
+                        }
+                        break;
+                    
+                    case 'audio-chunk':
+                        // Handle audio (simplified for demo)
+                        if (msg.from && msg.from !== userId) {
+                            participants.add(msg.from);
+                        }
+                        break;
+                }
+
+                updateStats();
+            };
+
+            ws.onerror = (err) => {
+                document.getElementById('status').textContent = '❌ Connection error';
+                console.error('WebSocket error:', err);
+            };
+
+            ws.onclose = () => {
+                document.getElementById('status').textContent = '🔌 Disconnected';
+                stopStreaming();
+            };
+        }
+
+        function startStreaming() {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const video = document.getElementById('localVideo');
+            
+            canvas.width = 320;
+            canvas.height = 240;
+
+            // Send video frames at 15 FPS
+            const videoInterval = setInterval(() => {
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    clearInterval(videoInterval);
+                    return;
+                }
+
+                ctx.drawImage(video, 0, 0, 320, 240);
+                canvas.toBlob((blob) => {
+                    blob.arrayBuffer().then(buffer => {
+                        const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+                        
+                        const msg = JSON.stringify({
+                            type: 'video-frame',
+                            data: base64,
+                            timestamp: Date.now(),
+                            seq: frameCount++
+                        });
+                        
+                        ws.send(msg);
+                        bytesSent += msg.length;
+                    });
+                }, 'image/jpeg', 0.7);
+            }, 67); // ~15 FPS
+
+            // Send audio chunks (simplified)
+            const audioInterval = setInterval(() => {
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    clearInterval(audioInterval);
+                    return;
+                }
+
+                // Simulate audio chunk
+                const audioData = new Uint8Array(320);
+                crypto.getRandomValues(audioData);
+                
+                const msg = JSON.stringify({
+                    type: 'audio-chunk',
+                    data: btoa(String.fromCharCode(...audioData)),
+                    timestamp: Date.now()
+                });
+                
+                ws.send(msg);
+                bytesSent += msg.length;
+            }, 20); // 50 chunks/sec
+
+            window.streamingIntervals = { videoInterval, audioInterval };
+        }
+
+        function stopStreaming() {
+            if (window.streamingIntervals) {
+                clearInterval(window.streamingIntervals.videoInterval);
+                clearInterval(window.streamingIntervals.audioInterval);
+            }
+        }
+
+        function displayRemoteFrame(fromUser, data, frameSize) {
+            let img = document.getElementById(`remote-${fromUser}`);
+            if (!img) {
+                img = document.createElement('img');
+                img.id = `remote-${fromUser}`;
+                img.style.width = '100%';
+                img.style.borderRadius = '5px';
+                
+                const container = document.createElement('div');
+                container.innerHTML = `<h4>${fromUser}</h4>`;
+                container.appendChild(img);
+                
+                document.getElementById('remoteVideos').appendChild(container);
+            }
+            
+            // Display the WebP compressed frame
+            img.src = `data:image/webp;base64,${data}`;
+        }
+
+        function updateStats() {
+            const now = Date.now();
+            const elapsed = (now - lastStatsTime) / 1000;
+            
+            if (elapsed > 1) {
+                // Compression ratio
+                if (compressionRatios.length > 0) {
+                    const avgCompression = compressionRatios.reduce((a,b) => a+b, 0) / compressionRatios.length;
+                    document.getElementById('compression').textContent = avgCompression.toFixed(1) + 'x';
+                }
+                
+                // Bandwidth
+                const bandwidth = ((bytesSent + bytesRecv) * 8 / elapsed / 1000).toFixed(0);
+                document.getElementById('bandwidth').textContent = bandwidth;
+                
+                // FPS estimate
+                const fps = (frameCount / elapsed).toFixed(1);
+                document.getElementById('fps').textContent = fps;
+                
+                // Participants
+                document.getElementById('participants').textContent = participants.size;
+                
+                // Reset counters
+                bytesSent = 0;
+                bytesRecv = 0;
+                frameCount = 0;
+                lastStatsTime = now;
+            }
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+            
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            
+            stopStreaming();
+            document.getElementById('remoteVideos').innerHTML = '';
+            participants.clear();
+            updateStats();
+        }
+
+        // Update stats periodically
+        setInterval(updateStats, 1000);
+    </script>
+</body>
+</html>

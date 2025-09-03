@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>WebSocket Bandwidth Test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 32px;
+        }
+        .test-panel {
+            background: rgba(255,255,255,0.1);
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 20px;
+        }
+        .server-input {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+        input {
+            flex: 1;
+            padding: 12px;
+            border-radius: 8px;
+            border: none;
+            font-size: 16px;
+        }
+        button {
+            padding: 12px 30px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            background: #4CAF50;
+            color: white;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        button:hover:not(:disabled) {
+            transform: scale(1.05);
+            background: #45a049;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .test-controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .test-button {
+            padding: 20px;
+            text-align: center;
+            background: rgba(255,255,255,0.2);
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .test-button:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        .test-button.running {
+            background: rgba(255, 165, 0, 0.5);
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        .results {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }
+        .result-card {
+            background: rgba(255,255,255,0.15);
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+        }
+        .result-label {
+            font-size: 14px;
+            opacity: 0.8;
+            margin-bottom: 10px;
+        }
+        .result-value {
+            font-size: 28px;
+            font-weight: bold;
+        }
+        .result-unit {
+            font-size: 14px;
+            opacity: 0.8;
+        }
+        .log {
+            background: rgba(0,0,0,0.3);
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 30px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 5px;
+            border-left: 3px solid #4CAF50;
+            padding-left: 10px;
+        }
+        .log-entry.error {
+            border-left-color: #f44336;
+            color: #ffcdd2;
+        }
+        .status {
+            text-align: center;
+            padding: 15px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 15px;
+            overflow: hidden;
+            margin: 20px 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50, #8BC34A);
+            border-radius: 15px;
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 WebSocket Bandwidth Test</h1>
+        
+        <div class="test-panel">
+            <div class="server-input">
+                <input type="text" id="serverUrl" placeholder="ws://194.87.103.57:8090/ws" value="ws://194.87.103.57:8090/ws">
+                <button id="connectBtn" onclick="toggleConnection()">Connect</button>
+            </div>
+            
+            <div class="status" id="status">Disconnected</div>
+            
+            <div class="progress-bar" id="progressBar" style="display: none;">
+                <div class="progress-fill" id="progressFill">0%</div>
+            </div>
+            
+            <div class="test-controls">
+                <button class="test-button" onclick="runLatencyTest()" disabled id="latencyBtn">
+                    📡 Latency Test
+                </button>
+                <button class="test-button" onclick="runDownloadTest(1)" disabled id="downloadBtn1">
+                    ⬇️ Download 1MB
+                </button>
+                <button class="test-button" onclick="runDownloadTest(10)" disabled id="downloadBtn10">
+                    ⬇️ Download 10MB
+                </button>
+                <button class="test-button" onclick="runDownloadTest(50)" disabled id="downloadBtn50">
+                    ⬇️ Download 50MB
+                </button>
+                <button class="test-button" onclick="runUploadTest(1)" disabled id="uploadBtn1">
+                    ⬆️ Upload 1MB
+                </button>
+                <button class="test-button" onclick="runUploadTest(10)" disabled id="uploadBtn10">
+                    ⬆️ Upload 10MB
+                </button>
+                <button class="test-button" onclick="runFullTest()" disabled id="fullTestBtn">
+                    🔄 Full Test
+                </button>
+            </div>
+            
+            <div class="results">
+                <div class="result-card">
+                    <div class="result-label">Latency</div>
+                    <div class="result-value" id="latency">-</div>
+                    <div class="result-unit">ms</div>
+                </div>
+                <div class="result-card">
+                    <div class="result-label">Download</div>
+                    <div class="result-value" id="download">-</div>
+                    <div class="result-unit">Mbps</div>
+                </div>
+                <div class="result-card">
+                    <div class="result-label">Upload</div>
+                    <div class="result-value" id="upload">-</div>
+                    <div class="result-unit">Mbps</div>
+                </div>
+                <div class="result-card">
+                    <div class="result-label">Jitter</div>
+                    <div class="result-value" id="jitter">-</div>
+                    <div class="result-unit">ms</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let isConnected = false;
+        let testInProgress = false;
+        let downloadChunks = [];
+        let uploadStartTime = 0;
+        let latencyResults = [];
+        
+        function log(message, isError = false) {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry' + (isError ? ' error' : '');
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.insertBefore(entry, logDiv.firstChild);
+            
+            // Keep only last 50 entries
+            while (logDiv.children.length > 50) {
+                logDiv.removeChild(logDiv.lastChild);
+            }
+        }
+        
+        function updateStatus(text, color = '') {
+            const status = document.getElementById('status');
+            status.textContent = text;
+            if (color) {
+                status.style.background = color;
+            }
+        }
+        
+        function updateProgress(percent) {
+            const bar = document.getElementById('progressBar');
+            const fill = document.getElementById('progressFill');
+            
+            if (percent > 0) {
+                bar.style.display = 'block';
+                fill.style.width = percent + '%';
+                fill.textContent = Math.round(percent) + '%';
+            } else {
+                bar.style.display = 'none';
+            }
+        }
+        
+        function toggleConnection() {
+            if (isConnected) {
+                disconnect();
+            } else {
+                connect();
+            }
+        }
+        
+        function connect() {
+            const url = document.getElementById('serverUrl').value;
+            if (!url) {
+                log('Please enter a server URL', true);
+                return;
+            }
+            
+            log(`Connecting to ${url}...`);
+            
+            ws = new WebSocket(url);
+            
+            ws.onopen = () => {
+                isConnected = true;
+                log('Connected successfully');
+                updateStatus('Connected', 'rgba(76, 175, 80, 0.3)');
+                document.getElementById('connectBtn').textContent = 'Disconnect';
+                
+                // Enable test buttons
+                document.querySelectorAll('.test-button').forEach(btn => {
+                    btn.disabled = false;
+                });
+            };
+            
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                handleMessage(msg);
+            };
+            
+            ws.onerror = (error) => {
+                log(`Connection error: ${error}`, true);
+                updateStatus('Error', 'rgba(244, 67, 54, 0.3)');
+            };
+            
+            ws.onclose = () => {
+                isConnected = false;
+                log('Disconnected');
+                updateStatus('Disconnected');
+                document.getElementById('connectBtn').textContent = 'Connect';
+                
+                // Disable test buttons
+                document.querySelectorAll('.test-button').forEach(btn => {
+                    btn.disabled = true;
+                });
+            };
+        }
+        
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+        
+        function handleMessage(msg) {
+            switch (msg.type) {
+                case 'pong':
+                    handlePong(msg);
+                    break;
+                    
+                case 'download-chunk':
+                    handleDownloadChunk(msg);
+                    break;
+                    
+                case 'download-complete':
+                    handleDownloadComplete(msg);
+                    break;
+                    
+                case 'upload-result':
+                    handleUploadResult(msg);
+                    break;
+                    
+                case 'echo-reply':
+                    handleEchoReply(msg);
+                    break;
+            }
+        }
+        
+        async function runLatencyTest() {
+            if (testInProgress) return;
+            testInProgress = true;
+            
+            log('Starting latency test...');
+            updateStatus('Running latency test...', 'rgba(255, 165, 0, 0.3)');
+            
+            latencyResults = [];
+            const numPings = 10;
+            
+            for (let i = 0; i < numPings; i++) {
+                const startTime = Date.now();
+                
+                await new Promise((resolve) => {
+                    const pingHandler = (event) => {
+                        const msg = JSON.parse(event.data);
+                        if (msg.type === 'pong') {
+                            const latency = Date.now() - startTime;
+                            latencyResults.push(latency);
+                            ws.removeEventListener('message', pingHandler);
+                            resolve();
+                        }
+                    };
+                    
+                    ws.addEventListener('message', pingHandler);
+                    ws.send(JSON.stringify({ type: 'ping' }));
+                });
+                
+                updateProgress((i + 1) / numPings * 100);
+                await new Promise(r => setTimeout(r, 100)); // Small delay between pings
+            }
+            
+            // Calculate results
+            const avgLatency = latencyResults.reduce((a, b) => a + b, 0) / latencyResults.length;
+            const sortedLatencies = [...latencyResults].sort((a, b) => a - b);
+            const jitter = Math.max(...latencyResults) - Math.min(...latencyResults);
+            
+            document.getElementById('latency').textContent = avgLatency.toFixed(1);
+            document.getElementById('jitter').textContent = jitter.toFixed(1);
+            
+            log(`Latency test complete: ${avgLatency.toFixed(1)}ms (jitter: ${jitter.toFixed(1)}ms)`);
+            updateStatus('Ready');
+            updateProgress(0);
+            testInProgress = false;
+        }
+        
+        function runDownloadTest(sizeMB) {
+            if (testInProgress || !ws) return;
+            testInProgress = true;
+            
+            const sizeBytes = sizeMB * 1024 * 1024;
+            log(`Starting download test (${sizeMB}MB)...`);
+            updateStatus(`Downloading ${sizeMB}MB...`, 'rgba(255, 165, 0, 0.3)');
+            
+            downloadChunks = [];
+            const startTime = Date.now();
+            
+            ws.send(JSON.stringify({
+                type: 'download-test',
+                size: sizeBytes
+            }));
+        }
+        
+        function handleDownloadChunk(msg) {
+            downloadChunks.push(msg.size);
+            const totalReceived = downloadChunks.reduce((a, b) => a + b, 0);
+            // Update progress based on chunks received
+        }
+        
+        function handleDownloadComplete(msg) {
+            document.getElementById('download').textContent = msg.speed.toFixed(2);
+            log(`Download complete: ${msg.speed.toFixed(2)} Mbps (${msg.duration.toFixed(2)}s)`);
+            updateStatus('Ready');
+            updateProgress(0);
+            testInProgress = false;
+        }
+        
+        async function runUploadTest(sizeMB) {
+            if (testInProgress || !ws) return;
+            testInProgress = true;
+            
+            const sizeBytes = sizeMB * 1024 * 1024;
+            log(`Starting upload test (${sizeMB}MB)...`);
+            updateStatus(`Uploading ${sizeMB}MB...`, 'rgba(255, 165, 0, 0.3)');
+            
+            // Notify server we're starting upload
+            ws.send(JSON.stringify({
+                type: 'upload-test',
+                size: sizeBytes
+            }));
+            
+            // Generate and send test data in chunks
+            const chunkSize = 1024 * 1024; // 1MB chunks
+            let totalSent = 0;
+            uploadStartTime = Date.now();
+            
+            while (totalSent < sizeBytes) {
+                const remaining = sizeBytes - totalSent;
+                const currentChunkSize = Math.min(chunkSize, remaining);
+                
+                // Generate random data
+                const data = new Array(currentChunkSize).fill('X').join('');
+                
+                ws.send(JSON.stringify({
+                    type: 'upload-chunk',
+                    data: data,
+                    size: currentChunkSize
+                }));
+                
+                totalSent += currentChunkSize;
+                updateProgress(totalSent / sizeBytes * 100);
+                
+                // Small delay to avoid overwhelming
+                await new Promise(r => setTimeout(r, 10));
+            }
+            
+            // Send completion message
+            ws.send(JSON.stringify({
+                type: 'upload-complete',
+                size: totalSent
+            }));
+        }
+        
+        function handleUploadResult(msg) {
+            document.getElementById('upload').textContent = msg.speed.toFixed(2);
+            log(`Upload complete: ${msg.speed.toFixed(2)} Mbps (${msg.duration.toFixed(2)}s)`);
+            updateStatus('Ready');
+            updateProgress(0);
+            testInProgress = false;
+        }
+        
+        async function runFullTest() {
+            log('Starting full bandwidth test...');
+            
+            // Run tests in sequence
+            await runLatencyTest();
+            await new Promise(r => setTimeout(r, 1000));
+            
+            await new Promise(resolve => {
+                const handler = () => {
+                    if (!testInProgress) {
+                        resolve();
+                    } else {
+                        setTimeout(handler, 100);
+                    }
+                };
+                runDownloadTest(10);
+                setTimeout(handler, 100);
+            });
+            
+            await new Promise(r => setTimeout(r, 1000));
+            
+            await new Promise(resolve => {
+                const handler = () => {
+                    if (!testInProgress) {
+                        resolve();
+                    } else {
+                        setTimeout(handler, 100);
+                    }
+                };
+                runUploadTest(10);
+                setTimeout(handler, 100);
+            });
+            
+            log('Full test complete!');
+        }
+        
+        // Auto-connect on load for testing
+        window.addEventListener('load', () => {
+            const defaultUrl = 'ws://194.87.103.57:8090/ws';
+            document.getElementById('serverUrl').value = defaultUrl;
+            // Uncomment to auto-connect:
+            // setTimeout(connect, 500);
+        });
+    </script>
+</body>
+</html>
