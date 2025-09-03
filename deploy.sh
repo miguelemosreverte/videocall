@@ -22,11 +22,11 @@ docker save webp-conference:latest | gzip > conference.tar.gz
 
 # Copy files to server
 echo "📤 Copying files to Hetzner server..."
-scp conference.tar.gz docker-compose.yml Caddyfile root@91.107.208.116:/root/conference/
+scp conference.tar.gz docker-compose.yml Caddyfile root@91.99.159.21:/root/conference/
 
 # Deploy on server
 echo "🔄 Deploying on server..."
-ssh root@91.107.208.116 << 'EOF'
+ssh root@91.99.159.21 << 'EOF'
 cd /root/conference
 
 # Stop existing containers
@@ -45,7 +45,7 @@ docker-compose logs --tail=20
 EOF
 
 echo "✅ Deployment complete!"
-echo "🌐 Server: wss://91.107.208.116.nip.io/ws"
+echo "🌐 Server: wss://91.99.159.21.nip.io/ws"
 echo "📄 GitHub Pages: https://miguelemosreverte.github.io/videocall/"
 
 # Clean up local file
