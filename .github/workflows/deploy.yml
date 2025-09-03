@@ -22,14 +22,28 @@ jobs:
         BUILD_BY="GitHub Actions"
         BUILD_REF="${{ github.ref }}"
         
-        docker build -t webp-conference:latest \
+        echo "Building Docker image..."
+        if ! docker build -t webp-conference:latest \
           --build-arg BUILD_TIME="$BUILD_TIME" \
           --build-arg BUILD_COMMIT="$BUILD_COMMIT" \
           --build-arg BUILD_BY="$BUILD_BY" \
           --build-arg BUILD_REF="$BUILD_REF" \
-          .
+          . 2>&1 | tee build.log; then
+          echo "Docker build failed. Last 50 lines of output:"
+          tail -50 build.log
+          echo "::error::Docker build failed. Check the logs above."
+          exit 1
+        fi
         
         docker save webp-conference:latest | gzip > conference.tar.gz
+    
+    - name: Upload build logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: build-logs
+        path: build.log
+        retention-days: 7
     
     - name: Deploy to Hetzner
       uses: appleboy/ssh-action@v1.0.0
