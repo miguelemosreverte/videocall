@@ -52,5 +52,5 @@ RUN mkdir -p /app/certs
 # 80 - HTTP (for Let's Encrypt challenges)
 EXPOSE 3001 443 80
 
-# Default to running the SSL wrapper (which starts the WebP server internally)
-CMD ["./conference-webp-ssl"]
+# Run the echo-free conference server directly
+CMD ["./conference-webp"]

@@ -6,9 +6,8 @@ services:
     image: webp-conference:latest
     container_name: webp-conference
     ports:
-      - "80:80"      # HTTP for Let's Encrypt
-      - "443:443"    # HTTPS/WSS
-      - "3001:3001"  # WebSocket server (optional, for direct access)
+      - "3001:3001"  # Internal WebSocket server
+    command: ["./conference-webp"]  # Run echo-free server directly
     environment:
       # Server configuration
       - DOMAIN=${DOMAIN:-localhost}
@@ -38,19 +37,24 @@ services:
       retries: 3
       start_period: 10s
 
-  # Optional: Nginx reverse proxy for additional features
-  nginx:
-    image: nginx:alpine
-    container_name: webp-conference-nginx
+  # Caddy reverse proxy for SSL
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy-proxy
     ports:
-      - "8080:80"  # Alternative HTTP port
+      - "80:80"      # HTTP
+      - "443:443"    # HTTPS
     volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./html:/usr/share/nginx/html:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
     depends_on:
       - conference-server
-    profiles:
-      - with-nginx
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
 
 networks:
   default:

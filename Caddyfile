@@ -1,4 +1,6 @@
 91.99.159.21.nip.io {
-    reverse_proxy /ws conference-server:3001
-    reverse_proxy conference-server:3001
+    reverse_proxy /ws webp-conference:3001
+    reverse_proxy /health webp-conference:3001
+    reverse_proxy /info webp-conference:3001
+    reverse_proxy webp-conference:3001
 }
