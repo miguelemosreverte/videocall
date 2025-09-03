@@ -1,8 +1,9 @@
 # Multi-stage build for optimized Go binary
-FROM golang:1.23.4-alpine AS builder
+# Use debian-based image for better CGO compatibility
+FROM golang:1.23.4-bookworm AS builder
 
 # Install build dependencies (including libwebp for CGO)
-RUN apk add --no-cache git gcc g++ musl-dev libwebp-dev
+RUN apt-get update && apt-get install -y git gcc g++ libwebp-dev && rm -rf /var/lib/apt/lists/*
 
 # Build arguments for deployment info
 ARG BUILD_TIME=unknown
@@ -31,11 +32,11 @@ RUN CGO_ENABLED=1 GOOS=linux go build \
 # Build the SSL wrapper
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o conference-webp-ssl conference-webp-ssl.go
 
-# Final stage - minimal image
-FROM alpine:latest
+# Final stage - use debian slim for CGO compatibility
+FROM debian:bookworm-slim
 
 # Install ca-certificates for HTTPS and libwebp for runtime
-RUN apk --no-cache add ca-certificates libwebp
+RUN apt-get update && apt-get install -y ca-certificates libwebp7 && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
