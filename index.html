@@ -1,308 +1,535 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>WebP Video Conference - Optimized</title>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Adaptive WebP Conference - Up to 4K 60FPS</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         
+        :root {
+            --primary: #667eea;
+            --secondary: #764ba2;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --dark: #1f2937;
+            --light: #f3f4f6;
+        }
+        
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
             min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        /* Header */
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 1rem 2rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 1000;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--dark);
+        }
+        
+        .quality-badge {
+            background: linear-gradient(135deg, #fbbf24, #f59e0b);
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            animation: pulse 2s infinite;
+        }
+        
+        .quality-badge.ultra {
+            background: linear-gradient(135deg, #10b981, #059669);
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.9; transform: scale(1.05); }
+        }
+        
+        /* Main Content */
+        .main {
+            flex: 1;
+            padding: 2rem;
+            display: flex;
+            gap: 2rem;
+            max-width: 1920px;
+            width: 100%;
+            margin: 0 auto;
+        }
+        
+        /* Video Grid */
+        .video-grid {
+            flex: 1;
+            display: grid;
+            gap: 1rem;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            grid-auto-rows: minmax(300px, 1fr);
+            height: fit-content;
+        }
+        
+        .video-container {
+            background: #000;
+            border-radius: 16px;
+            overflow: hidden;
+            position: relative;
+            aspect-ratio: 16/9;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        
+        .video-container.hd {
+            border: 2px solid var(--warning);
+        }
+        
+        .video-container.ultra-hd {
+            border: 2px solid var(--success);
+            box-shadow: 0 0 30px rgba(16, 185, 129, 0.3);
+        }
+        
+        video, canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: #000;
+        }
+        
+        /* Quality Indicator */
+        .quality-indicator {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(10px);
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            color: white;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .quality-indicator .badge {
+            background: var(--success);
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+        
+        /* Performance Monitor */
+        .performance-monitor {
+            position: absolute;
+            bottom: 1rem;
+            left: 1rem;
+            right: 1rem;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(10px);
+            padding: 1rem;
+            border-radius: 8px;
+            color: white;
+            font-size: 0.75rem;
+        }
+        
+        .perf-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 1rem;
+        }
+        
+        .perf-item {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+        
+        .perf-label {
+            color: rgba(255, 255, 255, 0.6);
+        }
+        
+        .perf-value {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+        
+        /* Sidebar */
+        .sidebar {
+            width: 400px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            padding: 1.5rem;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            max-height: calc(100vh - 8rem);
+            overflow-y: auto;
+        }
+        
+        /* Network Stats */
+        .network-stats {
+            background: var(--light);
+            border-radius: 12px;
+            padding: 1rem;
+        }
+        
+        .bandwidth-meter {
+            margin-top: 1rem;
+            height: 40px;
+            background: #e5e7eb;
+            border-radius: 20px;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .bandwidth-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+            transition: width 0.5s;
             display: flex;
             align-items: center;
             justify-content: center;
-        }
-        
-        .container {
-            background: white;
-            border-radius: 20px;
-            padding: 30px;
-            width: 90%;
-            max-width: 1400px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
-        }
-        
-        h1 {
-            color: #333;
-            margin-bottom: 20px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .status {
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            font-weight: 500;
-            transition: all 0.3s;
-        }
-        
-        .status.connected {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        
-        .status.disconnected {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        
-        .status.connecting {
-            background: #fff3cd;
-            color: #856404;
-            border: 1px solid #ffeeba;
-        }
-        
-        .controls {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
-            flex-wrap: wrap;
-        }
-        
-        button {
-            padding: 12px 24px;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
+            color: white;
             font-weight: 600;
+        }
+        
+        /* Quality Selector */
+        .quality-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.5rem;
+        }
+        
+        .quality-option {
+            padding: 0.75rem;
+            border: 2px solid var(--light);
+            background: white;
+            border-radius: 8px;
+            text-align: center;
             cursor: pointer;
             transition: all 0.3s;
+            font-size: 0.75rem;
         }
         
-        button.primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        .quality-option.available {
+            border-color: var(--success);
+            background: rgba(16, 185, 129, 0.1);
+        }
+        
+        .quality-option.active {
+            background: var(--primary);
             color: white;
+            border-color: var(--primary);
+            transform: scale(1.05);
         }
         
-        button.primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(102,126,234,0.4);
-        }
-        
-        button.secondary {
-            background: #6c757d;
-            color: white;
-        }
-        
-        button:disabled {
+        .quality-option.unavailable {
             opacity: 0.5;
             cursor: not-allowed;
         }
         
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 15px;
-            margin-bottom: 20px;
+        .quality-option .resolution {
+            font-weight: 600;
+            font-size: 0.875rem;
         }
         
-        .stat-card {
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-            padding: 15px;
-            border-radius: 10px;
-            color: white;
-            text-align: center;
+        .quality-option .bandwidth {
+            color: #6b7280;
+            font-size: 0.625rem;
+            margin-top: 0.25rem;
         }
         
-        .stat-value {
-            font-size: 28px;
-            font-weight: bold;
-            margin-bottom: 5px;
+        /* Controls */
+        .controls {
+            display: flex;
+            gap: 0.5rem;
         }
         
-        .stat-label {
-            font-size: 12px;
-            opacity: 0.9;
-            text-transform: uppercase;
-        }
-        
-        .videos {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-        }
-        
-        .video-container {
-            position: relative;
-            background: #000;
-            border-radius: 10px;
-            overflow: hidden;
-            aspect-ratio: 4/3;
-        }
-        
-        .video-container video,
-        .video-container img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-        
-        .video-label {
-            position: absolute;
-            bottom: 10px;
-            left: 10px;
-            background: rgba(0,0,0,0.7);
-            color: white;
-            padding: 5px 10px;
-            border-radius: 5px;
-            font-size: 14px;
-        }
-        
-        .remote-videos {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 15px;
-        }
-        
-        .audio-indicator {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            width: 30px;
-            height: 30px;
-            border-radius: 50%;
-            background: rgba(76, 175, 80, 0.8);
+        .control-btn {
+            flex: 1;
+            padding: 0.75rem;
+            border: none;
+            border-radius: 12px;
+            background: var(--light);
+            color: var(--dark);
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s;
             display: flex;
             align-items: center;
             justify-content: center;
         }
         
-        .audio-indicator.active {
-            animation: pulse 1s infinite;
+        .control-btn:hover {
+            background: var(--primary);
+            color: white;
+            transform: translateY(-2px);
         }
         
-        @keyframes pulse {
-            0% { transform: scale(1); opacity: 1; }
-            50% { transform: scale(1.2); opacity: 0.7; }
-            100% { transform: scale(1); opacity: 1; }
+        /* Adaptive Settings */
+        .adaptive-controls {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+            padding: 1rem;
+            border-radius: 12px;
         }
         
-        @media (max-width: 768px) {
-            .container {
-                width: 95%;
-                padding: 20px;
-            }
-            
-            .videos {
-                grid-template-columns: 1fr;
-            }
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 30px;
+        }
+        
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.3);
+            transition: 0.4s;
+            border-radius: 34px;
+        }
+        
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 22px;
+            width: 22px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: 0.4s;
+            border-radius: 50%;
+        }
+        
+        input:checked + .slider {
+            background-color: var(--success);
+        }
+        
+        input:checked + .slider:before {
+            transform: translateX(30px);
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>🎥 WebP Conference (Audio Fixed)</h1>
-        
-        <div id="status" class="status disconnected">
-            📡 Ready to connect to VPS
+    <!-- Header -->
+    <header class="header">
+        <div class="logo">
+            <span>🚀 Adaptive Conference</span>
+            <span class="quality-badge" id="currentQualityBadge">Auto</span>
         </div>
-        
-        <div class="controls">
-            <button class="primary" onclick="startConference()">Join Conference</button>
-            <button class="secondary" onclick="disconnect()">Leave</button>
-            <button class="secondary" onclick="toggleAudio()">🔇 Mute</button>
-        </div>
-        
-        <div class="stats">
-            <div class="stat-card">
-                <div class="stat-value" id="compression">0x</div>
-                <div class="stat-label">WebP Compression</div>
+        <div class="status-bar">
+            <div class="status-item">
+                <span>📊 Bandwidth:</span>
+                <strong id="currentBandwidth">0 Mbps</strong>
             </div>
-            <div class="stat-card" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);">
-                <div class="stat-value" id="bandwidth">0</div>
-                <div class="stat-label">kbps Used</div>
+            <div class="status-item">
+                <span>⚡ Latency:</span>
+                <strong id="currentLatency">0ms</strong>
             </div>
-            <div class="stat-card" style="background: linear-gradient(135deg, #30cfd0 0%, #330867 100%);">
-                <div class="stat-value" id="fps">0</div>
-                <div class="stat-label">FPS</div>
-            </div>
-            <div class="stat-card" style="background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);">
-                <div class="stat-value" id="users">1</div>
-                <div class="stat-label">Users</div>
+            <div class="status-item">
+                <span>🎯 Quality:</span>
+                <strong id="currentResolution">-</strong>
             </div>
         </div>
-        
-        <div class="videos">
-            <div>
-                <h3>Your Video</h3>
-                <div class="video-container">
-                    <video id="localVideo" autoplay muted playsinline></video>
-                    <div class="video-label">You</div>
-                    <div class="audio-indicator" id="localAudioIndicator">🎤</div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main">
+        <!-- Video Grid -->
+        <div class="video-grid" id="videoGrid">
+            <!-- Local Video -->
+            <div class="video-container" id="localContainer" data-user-id="local">
+                <video id="localVideo" autoplay muted playsinline></video>
+                <div class="quality-indicator">
+                    <span>📹</span>
+                    <span class="badge" id="localQualityBadge">HD</span>
+                    <span id="localFPS">30 FPS</span>
+                </div>
+                <div class="performance-monitor">
+                    <div class="perf-grid">
+                        <div class="perf-item">
+                            <span class="perf-label">Frames</span>
+                            <span class="perf-value" id="framesSent">0</span>
+                        </div>
+                        <div class="perf-item">
+                            <span class="perf-label">Bandwidth</span>
+                            <span class="perf-value" id="uploadBandwidth">0</span>
+                        </div>
+                        <div class="perf-item">
+                            <span class="perf-label">CPU</span>
+                            <span class="perf-value" id="cpuUsage">0%</span>
+                        </div>
+                        <div class="perf-item">
+                            <span class="perf-label">Buffer</span>
+                            <span class="perf-value" id="bufferHealth">100%</span>
+                        </div>
+                    </div>
                 </div>
             </div>
-            <div>
-                <h3>Other Participants</h3>
-                <div id="remoteVideos" class="remote-videos"></div>
-            </div>
         </div>
-    </div>
+
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <!-- Adaptive Controls -->
+            <div class="adaptive-controls">
+                <h3 style="margin-bottom: 1rem;">🎯 Adaptive Quality</h3>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span>Auto-adjust quality</span>
+                    <label class="switch">
+                        <input type="checkbox" id="adaptiveToggle" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <p style="font-size: 0.75rem; margin-top: 0.5rem; opacity: 0.9;">
+                    System will automatically scale from 144p to 4K 60fps based on your bandwidth
+                </p>
+            </div>
+
+            <!-- Network Stats -->
+            <div class="network-stats">
+                <h3 style="margin-bottom: 0.5rem;">Network Performance</h3>
+                <div class="bandwidth-meter">
+                    <div class="bandwidth-fill" id="bandwidthMeter" style="width: 0%">
+                        <span id="bandwidthPercent">0%</span>
+                    </div>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-top: 0.5rem; font-size: 0.75rem;">
+                    <span>0 Mbps</span>
+                    <span id="maxBandwidth">20 Mbps</span>
+                </div>
+            </div>
+
+            <!-- Quality Grid -->
+            <div>
+                <h3 style="margin-bottom: 1rem;">Video Quality</h3>
+                <div class="quality-grid" id="qualityGrid">
+                    <!-- Quality options will be added here -->
+                </div>
+            </div>
+
+            <!-- Controls -->
+            <div class="controls">
+                <button id="toggleVideo" class="control-btn">📹 Video</button>
+                <button id="toggleAudio" class="control-btn">🎤 Audio</button>
+                <button id="requestMax" class="control-btn" style="background: var(--success); color: white;">
+                    🚀 Request 4K
+                </button>
+            </div>
+        </aside>
+    </main>
 
     <script>
-        // VPS WebSocket endpoint with WebP compression
-        const WS_URL = 'wss://194.87.103.57.nip.io/ws';
+        // Configuration
+        const WS_URL = 'wss://91.99.159.21.nip.io/ws';
         
+        // Quality presets matching server
+        const QUALITY_PRESETS = [
+            { name: '144p', width: 256, height: 144, fps: 10, bandwidth: 0.1 },
+            { name: '240p', width: 426, height: 240, fps: 15, bandwidth: 0.2 },
+            { name: '360p', width: 640, height: 360, fps: 15, bandwidth: 0.4 },
+            { name: '480p', width: 854, height: 480, fps: 20, bandwidth: 0.8 },
+            { name: '720p', width: 1280, height: 720, fps: 30, bandwidth: 1.5 },
+            { name: '1080p', width: 1920, height: 1080, fps: 30, bandwidth: 3 },
+            { name: '1440p', width: 2560, height: 1440, fps: 30, bandwidth: 5 },
+            { name: '4K', width: 3840, height: 2160, fps: 30, bandwidth: 10 },
+            { name: '4K 60', width: 3840, height: 2160, fps: 60, bandwidth: 15 }
+        ];
+        
+        // State
         let ws = null;
         let localStream = null;
         let userId = 'user-' + Math.random().toString(36).substr(2, 9);
-        let roomId = 'conference-room';
-        let isConnected = false;
-        let audioMuted = false;
+        let videoEnabled = true;
+        let audioEnabled = true;
+        let adaptiveEnabled = true;
+        let currentQuality = 2; // Start with 360p
+        let requestedQuality = null;
         
-        // Stats tracking
-        let frameCount = 0;
-        let bytesSent = 0;
+        // Performance metrics
+        let framesSent = 0;
+        let framesReceived = 0;
         let bytesReceived = 0;
-        let lastStatsUpdate = Date.now();
-        let compressionRatios = [];
-        let remoteUsers = new Set();
+        let lastBandwidthTime = Date.now();
+        let bandwidth = 0;
+        let latency = 0;
+        let cpuUsage = 0;
+        let bufferFrames = [];
+        let droppedFrames = 0;
         
-        // Audio handling - FIXED!
-        let audioContext = null;
-        let audioProcessor = null;
-        let remoteAudioBuffers = {};
-        let audioWorkletNode = null;
+        // Performance monitoring
+        let performanceMonitor = null;
         
-        async function startConference() {
-            updateStatus('connecting', '🔄 Connecting to VPS...');
-            
+        // Initialize
+        async function init() {
             try {
-                // Get user media with lower resolution for faster performance
+                // Get user media with high quality constraints
                 localStream = await navigator.mediaDevices.getUserMedia({
                     video: {
-                        width: { ideal: 320, max: 640 },
-                        height: { ideal: 240, max: 480 },
-                        frameRate: { ideal: 15, max: 30 }
+                        width: { min: 640, ideal: 1920, max: 3840 },
+                        height: { min: 480, ideal: 1080, max: 2160 },
+                        frameRate: { min: 10, ideal: 30, max: 60 }
                     },
                     audio: {
+                        sampleRate: 48000,
+                        channelCount: 2,
                         echoCancellation: true,
                         noiseSuppression: true,
-                        autoGainControl: true,
-                        sampleRate: 16000  // Lower sample rate for smaller data
+                        autoGainControl: true
                     }
                 });
                 
                 document.getElementById('localVideo').srcObject = localStream;
                 
-                // Initialize audio context for playback
-                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                // Setup quality grid
+                setupQualityGrid();
                 
-                // Setup audio processing for sending
-                setupAudioSending();
-                
-                // Connect to WebSocket
+                // Connect WebSocket
                 connectWebSocket();
                 
-            } catch (err) {
-                console.error('Media error:', err);
-                updateStatus('disconnected', '❌ Camera/mic access denied');
+                // Setup controls
+                setupControls();
+                
+                // Start capture
+                startCapture();
+                
+                // Start performance monitoring
+                startPerformanceMonitoring();
+                
+                // Start feedback loop
+                startFeedbackLoop();
+                
+            } catch (error) {
+                console.error('Init error:', error);
+                alert('Failed to access camera/microphone: ' + error.message);
             }
         }
         
@@ -311,316 +538,328 @@
             ws.binaryType = 'arraybuffer';
             
             ws.onopen = () => {
-                isConnected = true;
-                updateStatus('connected', '✅ Connected to VPS (Audio Fixed!)');
+                console.log('Connected to adaptive server');
                 
-                // Send join message
+                // Join room
                 ws.send(JSON.stringify({
                     type: 'join',
-                    id: userId,
-                    room: roomId
+                    room: 'main',
+                    userId: userId
                 }));
-                
-                // Start streaming
-                startStreaming();
             };
             
-            ws.onmessage = (event) => {
-                const msg = JSON.parse(event.data);
-                bytesReceived += event.data.length;
-                
-                switch(msg.type) {
-                    case 'welcome':
-                        console.log('Joined room successfully');
-                        break;
-                        
-                    case 'video-frame':
-                        if (msg.from && msg.from !== userId) {
-                            displayRemoteVideo(msg.from, msg.data, msg.frameSize, msg.compressionType);
-                            remoteUsers.add(msg.from);
-                        }
-                        break;
-                        
-                    case 'audio-chunk':
-                        if (msg.from && msg.from !== userId) {
-                            playRemoteAudio(msg.from, msg.data);
-                            remoteUsers.add(msg.from);
-                        }
-                        break;
-                }
-                
-                updateStats();
-            };
+            ws.onmessage = handleMessage;
             
             ws.onerror = (error) => {
                 console.error('WebSocket error:', error);
-                updateStatus('disconnected', '❌ Connection error');
             };
             
             ws.onclose = () => {
-                isConnected = false;
-                updateStatus('disconnected', '🔌 Disconnected from VPS');
-                stopStreaming();
+                setTimeout(connectWebSocket, 3000);
             };
         }
         
-        function startStreaming() {
-            if (!localStream) return;
-            
-            const video = document.getElementById('localVideo');
+        function handleMessage(event) {
+            if (typeof event.data === 'string') {
+                const message = JSON.parse(event.data);
+                
+                switch (message.type) {
+                    case 'quality-change':
+                        handleQualityChange(message);
+                        break;
+                    
+                    case 'webp-frame':
+                        displayRemoteFrame(message);
+                        framesReceived++;
+                        bytesReceived += message.data.length;
+                        break;
+                    
+                    case 'audio':
+                        playRemoteAudio(message);
+                        break;
+                    
+                    case 'ping':
+                        ws.send(JSON.stringify({ 
+                            type: 'pong', 
+                            timestamp: message.timestamp 
+                        }));
+                        break;
+                    
+                    case 'pong':
+                        latency = Date.now() - message.timestamp;
+                        document.getElementById('currentLatency').textContent = latency + 'ms';
+                        break;
+                }
+            }
+        }
+        
+        function startCapture() {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
+            const video = document.getElementById('localVideo');
             
-            canvas.width = 320;
-            canvas.height = 240;
+            let frameInterval = 100; // Start with 10 FPS
             
-            // Video streaming at 10 FPS for better performance
-            const videoInterval = setInterval(() => {
-                if (!isConnected || !ws || ws.readyState !== WebSocket.OPEN) {
-                    clearInterval(videoInterval);
+            function captureFrame() {
+                if (!videoEnabled || !ws || ws.readyState !== WebSocket.OPEN) {
+                    setTimeout(captureFrame, frameInterval);
                     return;
                 }
                 
-                ctx.drawImage(video, 0, 0, 320, 240);
+                const preset = QUALITY_PRESETS[currentQuality];
                 
-                // Convert to JPEG with lower quality for faster transmission
+                // Adjust frame interval based on FPS
+                frameInterval = Math.floor(1000 / preset.fps);
+                
+                canvas.width = preset.width;
+                canvas.height = preset.height;
+                ctx.drawImage(video, 0, 0, preset.width, preset.height);
+                
+                // Use higher quality for higher resolutions
+                const jpegQuality = currentQuality >= 5 ? 0.9 : 0.7;
+                
                 canvas.toBlob((blob) => {
-                    if (!blob) return;
-                    
-                    const reader = new FileReader();
-                    reader.onloadend = () => {
-                        const base64 = reader.result.split(',')[1];
-                        
-                        const message = {
-                            type: 'video-frame',
-                            data: base64,
-                            timestamp: Date.now(),
-                            seq: frameCount++
+                    if (blob) {
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                            const base64 = reader.result.split(',')[1];
+                            ws.send(JSON.stringify({
+                                type: 'frame',
+                                data: base64,
+                                quality: preset.name
+                            }));
+                            framesSent++;
+                            document.getElementById('framesSent').textContent = framesSent;
                         };
-                        
-                        const data = JSON.stringify(message);
-                        ws.send(data);
-                        bytesSent += data.length;
-                    };
-                    reader.readAsDataURL(blob);
-                }, 'image/jpeg', 0.6);  // Lower quality for faster encoding
+                        reader.readAsDataURL(blob);
+                    }
+                }, 'image/jpeg', jpegQuality);
                 
-            }, 100); // 10 FPS for smoother performance
+                setTimeout(captureFrame, frameInterval);
+            }
             
-            // Store interval for cleanup
-            window.videoStreamInterval = videoInterval;
+            captureFrame();
         }
         
-        function setupAudioSending() {
-            if (!localStream) return;
-            
-            const audioTrack = localStream.getAudioTracks()[0];
-            if (!audioTrack) return;
-            
-            const mediaStreamSource = audioContext.createMediaStreamSource(localStream);
-            const processor = audioContext.createScriptProcessor(2048, 1, 1);
-            
-            processor.onaudioprocess = (e) => {
-                if (!isConnected || !ws || ws.readyState !== WebSocket.OPEN || audioMuted) return;
+        function startFeedbackLoop() {
+            setInterval(() => {
+                if (!ws || ws.readyState !== WebSocket.OPEN) return;
                 
-                const inputData = e.inputBuffer.getChannelData(0);
+                // Calculate buffer health (0-1)
+                const bufferHealth = Math.max(0, Math.min(1, 1 - (droppedFrames / Math.max(1, framesReceived))));
                 
-                // Convert float32 to int16
-                const pcm16 = new Int16Array(inputData.length);
-                for (let i = 0; i < inputData.length; i++) {
-                    const s = Math.max(-1, Math.min(1, inputData[i]));
-                    pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-                }
-                
-                // Convert to base64
-                const base64 = btoa(String.fromCharCode(...new Uint8Array(pcm16.buffer)));
-                
-                // Send audio chunk
+                // Send feedback to server
                 ws.send(JSON.stringify({
-                    type: 'audio-chunk',
-                    data: base64,
-                    timestamp: Date.now(),
-                    samples: pcm16.length
+                    type: 'feedback',
+                    feedback: {
+                        framesReceived: framesReceived,
+                        framesDropped: droppedFrames,
+                        bufferHealth: bufferHealth,
+                        cpuUsage: cpuUsage,
+                        bandwidth: bandwidth,
+                        latency: latency,
+                        requestQuality: requestedQuality
+                    }
                 }));
                 
-                bytesSent += base64.length;
+                // Send ping for latency measurement
+                ws.send(JSON.stringify({
+                    type: 'ping',
+                    timestamp: Date.now()
+                }));
                 
-                // Animate audio indicator
-                const indicator = document.getElementById('localAudioIndicator');
-                if (indicator) {
-                    indicator.classList.add('active');
-                    setTimeout(() => indicator.classList.remove('active'), 100);
+            }, 1000); // Send feedback every second
+        }
+        
+        function startPerformanceMonitoring() {
+            // Monitor CPU usage (approximation)
+            let lastTime = performance.now();
+            let frames = 0;
+            
+            function measureCPU() {
+                const currentTime = performance.now();
+                const delta = currentTime - lastTime;
+                
+                frames++;
+                if (delta >= 1000) {
+                    const fps = (frames * 1000) / delta;
+                    cpuUsage = Math.min(100, Math.max(0, 100 - (fps * 3))); // Rough estimate
+                    document.getElementById('cpuUsage').textContent = Math.round(cpuUsage) + '%';
+                    
+                    frames = 0;
+                    lastTime = currentTime;
+                }
+                
+                requestAnimationFrame(measureCPU);
+            }
+            measureCPU();
+            
+            // Monitor bandwidth
+            setInterval(() => {
+                const now = Date.now();
+                const duration = (now - lastBandwidthTime) / 1000;
+                bandwidth = (bytesReceived * 8) / (duration * 1000000); // Convert to Mbps
+                
+                document.getElementById('currentBandwidth').textContent = bandwidth.toFixed(2) + ' Mbps';
+                document.getElementById('uploadBandwidth').textContent = bandwidth.toFixed(1) + ' Mbps';
+                
+                // Update bandwidth meter
+                const percent = Math.min(100, (bandwidth / 20) * 100);
+                document.getElementById('bandwidthMeter').style.width = percent + '%';
+                document.getElementById('bandwidthPercent').textContent = Math.round(percent) + '%';
+                
+                bytesReceived = 0;
+                lastBandwidthTime = now;
+                
+                // Update quality availability
+                updateQualityAvailability();
+                
+            }, 1000);
+        }
+        
+        function handleQualityChange(message) {
+            console.log('Quality changed to:', message.quality);
+            
+            // Update current quality
+            for (let i = 0; i < QUALITY_PRESETS.length; i++) {
+                if (QUALITY_PRESETS[i].name === message.quality) {
+                    currentQuality = i;
+                    break;
+                }
+            }
+            
+            // Update UI
+            document.getElementById('currentQualityBadge').textContent = message.quality;
+            document.getElementById('localQualityBadge').textContent = message.quality;
+            document.getElementById('currentResolution').textContent = `${message.width}x${message.height}`;
+            document.getElementById('localFPS').textContent = message.fps + ' FPS';
+            
+            // Update quality badge style
+            const badge = document.getElementById('currentQualityBadge');
+            if (currentQuality >= 7) {
+                badge.className = 'quality-badge ultra';
+                document.getElementById('localContainer').className = 'video-container ultra-hd';
+            } else if (currentQuality >= 5) {
+                badge.className = 'quality-badge';
+                document.getElementById('localContainer').className = 'video-container hd';
+            } else {
+                badge.className = 'quality-badge';
+                document.getElementById('localContainer').className = 'video-container';
+            }
+            
+            updateQualityGrid();
+        }
+        
+        function setupQualityGrid() {
+            const grid = document.getElementById('qualityGrid');
+            
+            QUALITY_PRESETS.forEach((preset, index) => {
+                const option = document.createElement('div');
+                option.className = 'quality-option';
+                option.dataset.index = index;
+                option.innerHTML = `
+                    <div class="resolution">${preset.name}</div>
+                    <div class="bandwidth">${preset.bandwidth} Mbps</div>
+                `;
+                option.onclick = () => selectQuality(index);
+                grid.appendChild(option);
+            });
+        }
+        
+        function updateQualityGrid() {
+            const options = document.querySelectorAll('.quality-option');
+            options.forEach((option, index) => {
+                option.className = 'quality-option';
+                if (index === currentQuality) {
+                    option.classList.add('active');
+                }
+            });
+        }
+        
+        function updateQualityAvailability() {
+            const options = document.querySelectorAll('.quality-option');
+            options.forEach((option, index) => {
+                const preset = QUALITY_PRESETS[index];
+                option.className = 'quality-option';
+                
+                if (bandwidth >= preset.bandwidth) {
+                    option.classList.add('available');
+                } else {
+                    option.classList.add('unavailable');
+                }
+                
+                if (index === currentQuality) {
+                    option.classList.add('active');
+                }
+            });
+        }
+        
+        function selectQuality(index) {
+            if (!adaptiveEnabled) {
+                currentQuality = index;
+                requestedQuality = QUALITY_PRESETS[index].name;
+                updateQualityGrid();
+            }
+        }
+        
+        function displayRemoteFrame(message) {
+            // Handle remote video frames
+            // Implementation depends on your UI structure
+        }
+        
+        function playRemoteAudio(message) {
+            // Handle remote audio
+            // Implementation depends on your audio setup
+        }
+        
+        function setupControls() {
+            // Adaptive toggle
+            document.getElementById('adaptiveToggle').onchange = (e) => {
+                adaptiveEnabled = e.target.checked;
+                requestedQuality = adaptiveEnabled ? null : QUALITY_PRESETS[currentQuality].name;
+            };
+            
+            // Video toggle
+            document.getElementById('toggleVideo').onclick = () => {
+                videoEnabled = !videoEnabled;
+                const btn = document.getElementById('toggleVideo');
+                btn.style.background = videoEnabled ? '' : 'var(--danger)';
+                btn.style.color = videoEnabled ? '' : 'white';
+                
+                if (localStream) {
+                    localStream.getVideoTracks().forEach(track => {
+                        track.enabled = videoEnabled;
+                    });
                 }
             };
             
-            mediaStreamSource.connect(processor);
-            processor.connect(audioContext.destination);
-            audioProcessor = processor;
-        }
-        
-        function playRemoteAudio(userId, audioData) {
-            if (!audioContext) return;
-            
-            try {
-                // Decode base64 to ArrayBuffer
-                const binaryString = atob(audioData);
-                const len = binaryString.length;
-                const bytes = new Uint8Array(len);
-                for (let i = 0; i < len; i++) {
-                    bytes[i] = binaryString.charCodeAt(i);
+            // Audio toggle
+            document.getElementById('toggleAudio').onclick = () => {
+                audioEnabled = !audioEnabled;
+                const btn = document.getElementById('toggleAudio');
+                btn.style.background = audioEnabled ? '' : 'var(--danger)';
+                btn.style.color = audioEnabled ? '' : 'white';
+                
+                if (localStream) {
+                    localStream.getAudioTracks().forEach(track => {
+                        track.enabled = audioEnabled;
+                    });
                 }
-                
-                // Convert int16 to float32
-                const int16Array = new Int16Array(bytes.buffer);
-                const float32Array = new Float32Array(int16Array.length);
-                for (let i = 0; i < int16Array.length; i++) {
-                    float32Array[i] = int16Array[i] / 32768.0;
+            };
+            
+            // Request max quality
+            document.getElementById('requestMax').onclick = () => {
+                if (bandwidth >= 10) {
+                    requestedQuality = bandwidth >= 15 ? '4K 60' : '4K';
+                    alert(`Requesting ${requestedQuality} quality!`);
+                } else {
+                    alert(`Need at least 10 Mbps for 4K. Current: ${bandwidth.toFixed(1)} Mbps`);
                 }
-                
-                // Create audio buffer
-                const audioBuffer = audioContext.createBuffer(1, float32Array.length, audioContext.sampleRate);
-                audioBuffer.getChannelData(0).set(float32Array);
-                
-                // Play the audio
-                const source = audioContext.createBufferSource();
-                source.buffer = audioBuffer;
-                source.connect(audioContext.destination);
-                source.start();
-                
-                // Animate remote audio indicator
-                const indicator = document.getElementById(`audio-${userId}`);
-                if (indicator) {
-                    indicator.classList.add('active');
-                    setTimeout(() => indicator.classList.remove('active'), 100);
-                }
-                
-            } catch (err) {
-                console.error('Audio playback error:', err);
-            }
+            };
         }
         
-        function displayRemoteVideo(userId, frameData, frameSize, compressionType) {
-            let container = document.getElementById(`remote-${userId}`);
-            
-            if (!container) {
-                container = document.createElement('div');
-                container.className = 'video-container';
-                container.id = `remote-${userId}`;
-                container.innerHTML = `
-                    <img id="frame-${userId}" alt="Remote video">
-                    <div class="video-label">${userId}</div>
-                    <div class="audio-indicator" id="audio-${userId}">🔊</div>
-                `;
-                document.getElementById('remoteVideos').appendChild(container);
-            }
-            
-            const img = document.getElementById(`frame-${userId}`);
-            if (img) {
-                // Display WebP compressed frame
-                const mimeType = compressionType === 'webp' ? 'image/webp' : 'image/jpeg';
-                img.src = `data:${mimeType};base64,${frameData}`;
-                
-                // Track compression ratio
-                if (frameSize && compressionType === 'webp') {
-                    const originalSize = 25000; // Approximate JPEG size
-                    const ratio = originalSize / frameSize;
-                    compressionRatios.push(ratio);
-                    if (compressionRatios.length > 10) compressionRatios.shift();
-                }
-            }
-        }
-        
-        function toggleAudio() {
-            audioMuted = !audioMuted;
-            const btn = event.target;
-            btn.textContent = audioMuted ? '🔊 Unmute' : '🔇 Mute';
-            
-            if (localStream) {
-                localStream.getAudioTracks().forEach(track => {
-                    track.enabled = !audioMuted;
-                });
-            }
-        }
-        
-        function updateStats() {
-            const now = Date.now();
-            const elapsed = (now - lastStatsUpdate) / 1000;
-            
-            if (elapsed >= 1) {
-                // Compression ratio
-                if (compressionRatios.length > 0) {
-                    const avg = compressionRatios.reduce((a, b) => a + b, 0) / compressionRatios.length;
-                    document.getElementById('compression').textContent = avg.toFixed(1) + 'x';
-                }
-                
-                // Bandwidth
-                const kbps = ((bytesSent + bytesReceived) * 8 / elapsed / 1000).toFixed(0);
-                document.getElementById('bandwidth').textContent = kbps;
-                
-                // FPS
-                const fps = (frameCount / elapsed).toFixed(1);
-                document.getElementById('fps').textContent = fps;
-                
-                // Users
-                document.getElementById('users').textContent = remoteUsers.size + 1;
-                
-                // Reset counters
-                bytesSent = 0;
-                bytesReceived = 0;
-                frameCount = 0;
-                lastStatsUpdate = now;
-            }
-        }
-        
-        function stopStreaming() {
-            if (window.videoStreamInterval) {
-                clearInterval(window.videoStreamInterval);
-            }
-            
-            if (audioProcessor) {
-                audioProcessor.disconnect();
-                audioProcessor = null;
-            }
-            
-            if (audioContext && audioContext.state !== 'closed') {
-                audioContext.close();
-                audioContext = null;
-            }
-        }
-        
-        function disconnect() {
-            stopStreaming();
-            
-            if (ws) {
-                ws.close();
-                ws = null;
-            }
-            
-            if (localStream) {
-                localStream.getTracks().forEach(track => track.stop());
-                localStream = null;
-                document.getElementById('localVideo').srcObject = null;
-            }
-            
-            document.getElementById('remoteVideos').innerHTML = '';
-            remoteUsers.clear();
-            
-            updateStatus('disconnected', '📡 Ready to connect to VPS');
-        }
-        
-        function updateStatus(type, message) {
-            const status = document.getElementById('status');
-            status.className = 'status ' + type;
-            status.textContent = message;
-        }
-        
-        // Update stats every second
-        setInterval(updateStats, 1000);
-        
-        // Clean up on page unload
-        window.addEventListener('beforeunload', () => {
-            disconnect();
-        });
+        // Start the application
+        init();
     </script>
 </body>
 </html>

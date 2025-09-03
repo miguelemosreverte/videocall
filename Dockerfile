@@ -1,22 +1,48 @@
-# Build stage
-FROM golang:1.21-alpine AS builder
+# Multi-stage build for optimized Go binary
+FROM golang:1.23.4-alpine AS builder
 
-WORKDIR /app
-COPY conference.go .
-COPY go.mod .
-COPY go.sum .
+# Install build dependencies
+RUN apk add --no-cache git gcc musl-dev
 
+# Set working directory
+WORKDIR /build
+
+# Copy go mod files
+COPY go.mod go.sum ./
+
+# Download dependencies
 RUN go mod download
-RUN go build -o conference conference.go
 
-# Runtime stage
+# Copy source code
+COPY conference-webp.go .
+COPY conference-webp-ssl.go .
+
+# Build the WebP conference server
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o conference-webp conference-webp.go
+
+# Build the SSL wrapper
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o conference-webp-ssl conference-webp-ssl.go
+
+# Final stage - minimal image
 FROM alpine:latest
 
+# Install ca-certificates for HTTPS
 RUN apk --no-cache add ca-certificates
-WORKDIR /root/
 
-COPY --from=builder /app/conference .
+WORKDIR /app
 
-EXPOSE 8080
+# Copy binaries from builder
+COPY --from=builder /build/conference-webp .
+COPY --from=builder /build/conference-webp-ssl .
 
-CMD ["./conference"]
+# Create directory for SSL certificates
+RUN mkdir -p /app/certs
+
+# Expose ports
+# 3001 - WebP conference server (internal)
+# 443 - HTTPS/WSS (public)
+# 80 - HTTP (for Let's Encrypt challenges)
+EXPOSE 3001 443 80
+
+# Default to running the SSL wrapper (which starts the WebP server internally)
+CMD ["./conference-webp-ssl"]
