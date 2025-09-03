@@ -10,10 +10,10 @@ import (
 )
 
 var (
-    BuildTime   = "unknown"
-    BuildCommit = "unknown" 
-    BuildBy     = "local"
-    BuildRef    = "unknown"
+    BuildTime   = "2025-09-03T22:50:00Z"  // Will be overridden by ldflags if provided
+    BuildCommit = "latest"                 // Will be overridden by ldflags if provided
+    BuildBy     = "GitHub Actions"         // Will be overridden by ldflags if provided
+    BuildRef    = "refs/heads/main"        // Will be overridden by ldflags if provided
 )
 
 var upgrader = websocket.Upgrader{

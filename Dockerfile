@@ -25,9 +25,8 @@ COPY conference-simple.go .
 COPY conference-webp-ssl.go .
 
 # Build the simple conference server (no CGO needed, much faster)
-# Build for the target architecture (will be set by buildx)
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-arm64} go build \
-    -ldflags "-X main.BuildTime=${BUILD_TIME} -X main.BuildCommit=${BUILD_COMMIT} -X main.BuildBy=${BUILD_BY} -X main.BuildRef=${BUILD_REF}" \
+# Build for ARM64 architecture
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build \
     -o conference-webp conference-simple.go
 
 # Build the SSL wrapper
