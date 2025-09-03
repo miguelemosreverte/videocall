@@ -14,11 +14,11 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy source code
-COPY conference-webp.go .
+COPY conference-echo-free.go .
 COPY conference-webp-ssl.go .
 
-# Build the WebP conference server
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o conference-webp conference-webp.go
+# Build the echo-free conference server with audio feedback prevention
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o conference-webp conference-echo-free.go
 
 # Build the SSL wrapper
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o conference-webp-ssl conference-webp-ssl.go

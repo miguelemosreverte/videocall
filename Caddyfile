@@ -1,0 +1,4 @@
+91.107.208.116.nip.io {
+    reverse_proxy /ws conference-server:3001
+    reverse_proxy conference-server:3001
+}

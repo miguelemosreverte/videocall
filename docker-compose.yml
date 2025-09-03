@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  conference-server:
+    build: .
+    image: webp-conference:latest
+    container_name: webp-conference
+    ports:
+      - "80:80"      # HTTP for Let's Encrypt
+      - "443:443"    # HTTPS/WSS
+      - "3001:3001"  # WebSocket server (optional, for direct access)
+    environment:
+      # Server configuration
+      - DOMAIN=${DOMAIN:-localhost}
+      - USE_SSL=${USE_SSL:-false}
+      - CERT_EMAIL=${CERT_EMAIL:-admin@example.com}
+      
+      # Performance tuning
+      - MAX_USERS_PER_ROOM=${MAX_USERS_PER_ROOM:-10}
+      - VIDEO_QUALITY=${VIDEO_QUALITY:-auto}
+      - AUDIO_BITRATE=${AUDIO_BITRATE:-32000}
+      
+      # Bandwidth settings (in kbps)
+      - BANDWIDTH_LIMIT=${BANDWIDTH_LIMIT:-0}  # 0 = unlimited
+      - PER_USER_BANDWIDTH=${PER_USER_BANDWIDTH:-1000}
+      
+    volumes:
+      # Persist SSL certificates
+      - ./certs:/app/certs
+      - ./logs:/app/logs
+      
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3001/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Optional: Nginx reverse proxy for additional features
+  nginx:
+    image: nginx:alpine
+    container_name: webp-conference-nginx
+    ports:
+      - "8080:80"  # Alternative HTTP port
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./html:/usr/share/nginx/html:ro
+    depends_on:
+      - conference-server
+    profiles:
+      - with-nginx
+
+networks:
+  default:
+    name: conference-network

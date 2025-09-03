@@ -1,0 +1,74 @@
+name: Deploy Conference Server
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+    
+    - name: Build Docker image
+      run: |
+        docker build -t webp-conference:latest .
+        docker save webp-conference:latest | gzip > conference.tar.gz
+    
+    - name: Deploy to Hetzner
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: 91.107.208.116
+        username: root
+        key: ${{ secrets.HETZNER_SSH_KEY }}
+        script: |
+          # Stop existing containers
+          cd /root/conference || mkdir -p /root/conference
+          docker-compose down || true
+          
+          # Clean up old images
+          docker image prune -f
+    
+    - name: Copy files to server
+      uses: appleboy/scp-action@v0.1.5
+      with:
+        host: 91.107.208.116
+        username: root
+        key: ${{ secrets.HETZNER_SSH_KEY }}
+        source: "conference.tar.gz,docker-compose.yml,Caddyfile"
+        target: "/root/conference"
+    
+    - name: Deploy on server
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: 91.107.208.116
+        username: root
+        key: ${{ secrets.HETZNER_SSH_KEY }}
+        script: |
+          cd /root/conference
+          
+          # Load new image
+          docker load < conference.tar.gz
+          
+          # Start services
+          docker-compose up -d
+          
+          # Wait for services to be healthy
+          sleep 5
+          
+          # Check status
+          docker-compose ps
+          
+          # Show logs
+          docker-compose logs --tail=20
+    
+    - name: Update GitHub Pages
+      run: |
+        echo "GitHub Pages will automatically deploy from main branch"
+        echo "Visit: https://miguelemosreverte.github.io/videocall/"
+        echo "Server: wss://91.107.208.116.nip.io/ws"
