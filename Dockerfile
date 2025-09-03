@@ -16,15 +16,15 @@ WORKDIR /build
 # Copy go mod files
 COPY go.mod go.sum ./
 
-# Download dependencies (with verbose to debug)
-RUN go mod download -x
+# Download dependencies
+RUN go mod download
 
 # Copy source code
 COPY conference-echo-free.go .
 COPY conference-webp-ssl.go .
 
 # Build the echo-free conference server with deployment info (CGO required for WebP)
-RUN CGO_ENABLED=1 GOOS=linux go build -a \
+RUN CGO_ENABLED=1 GOOS=linux go build \
     -ldflags "-X main.BuildTime=${BUILD_TIME} -X main.BuildCommit=${BUILD_COMMIT} -X main.BuildBy=${BUILD_BY} -X main.BuildRef=${BUILD_REF}" \
     -o conference-webp conference-echo-free.go
 
