@@ -75,22 +75,25 @@ jobs:
         username: root
         key: ${{ secrets.HETZNER_SSH_KEY }}
         script: |
-          cd /root/conference
+          cd /root/conference || exit 1
+          
+          # Stop and remove old containers
+          docker-compose down || true
+          docker rm -f webp-conference caddy-proxy || true
           
           # Load new image
           docker load < conference.tar.gz
           
-          # Start services
-          docker-compose up -d
+          # Start services fresh
+          docker-compose up -d --force-recreate
           
           # Wait for services to be healthy
           sleep 5
           
-          # Check status
+          # Check status and health endpoint
           docker-compose ps
-          
-          # Show logs
-          docker-compose logs --tail=20
+          echo "Testing health endpoint:"
+          curl -s http://localhost:3001/health | head -20 || echo "Health endpoint not ready yet"
     
     - name: Update GitHub Pages
       run: |
