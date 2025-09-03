@@ -205,7 +205,7 @@
         // Configuration
         // Auto-detect protocol: use wss:// for HTTPS pages, ws:// for HTTP/local
         const isSecure = window.location.protocol === 'https:';
-        const defaultUrl = isSecure ? 'wss://194.87.103.57:3001/ws' : 'ws://194.87.103.57:3001/ws';
+        const defaultUrl = isSecure ? 'wss://194.87.103.57.nip.io/ws' : 'ws://194.87.103.57:3001/ws';
         let WS_URL = localStorage.getItem('wsServerUrl') || defaultUrl;
         document.getElementById('serverDisplay').textContent = WS_URL;
         
