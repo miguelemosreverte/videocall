@@ -12,8 +12,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+      
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
+      uses: docker/setup-buildx-action@v3
     
     - name: Build Docker image
       run: |
@@ -22,12 +25,13 @@ jobs:
         BUILD_BY="GitHub Actions"
         BUILD_REF="${{ github.ref }}"
         
-        echo "Building Docker image..."
-        if ! docker build -t webp-conference:latest \
+        echo "Building Docker image for ARM64..."
+        if ! docker buildx build --platform linux/arm64 -t webp-conference:latest \
           --build-arg BUILD_TIME="$BUILD_TIME" \
           --build-arg BUILD_COMMIT="$BUILD_COMMIT" \
           --build-arg BUILD_BY="$BUILD_BY" \
           --build-arg BUILD_REF="$BUILD_REF" \
+          --load \
           . 2>&1 | tee build.log; then
           echo "Docker build failed. Last 50 lines of output:"
           tail -50 build.log
