@@ -198,7 +198,6 @@
     <script>
         // Configuration
         let WS_URL = localStorage.getItem('wsServerUrl') || 'ws://194.87.103.57:3001/ws';
-        document.getElementById('serverUrl').value = WS_URL;
         document.getElementById('serverDisplay').textContent = WS_URL;
         
         // State
@@ -235,12 +234,6 @@
         const AUDIO_CHUNK_DURATION = 10; // 10ms chunks for low latency
         const AUDIO_BUFFER_SIZE = 512; // Smaller buffer for lower latency
         
-        function saveServer() {
-            WS_URL = document.getElementById('serverUrl').value;
-            localStorage.setItem('wsServerUrl', WS_URL);
-            document.getElementById('serverDisplay').textContent = WS_URL;
-            updateStatus('Server URL saved: ' + WS_URL, '#4caf50');
-        }
         
         function updateQuality() {
             const quality = document.getElementById('quality').value;
