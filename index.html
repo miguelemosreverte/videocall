@@ -142,8 +142,14 @@
         <h1>🎥 Video Conference</h1>
         
         <div class="info-box">
-            <p>Connecting to conference...</p>
+            <p id="infoText">Connecting to conference...</p>
             <p>Server: <code id="serverDisplay"></code></p>
+            <div id="certWarning" style="display:none; margin-top: 10px; padding: 10px; background: rgba(255,165,0,0.2); border-radius: 5px;">
+                <p><strong>⚠️ Certificate Warning</strong></p>
+                <p>To use HTTPS/WSS, you need to accept the self-signed certificate:</p>
+                <p><a href="https://194.87.103.57:3001/" target="_blank" style="color: #fff;">👆 Click here to accept certificate</a></p>
+                <p><small>Then refresh this page</small></p>
+            </div>
         </div>
         
         <div class="status" id="status">
@@ -404,13 +410,22 @@
             
             ws.onerror = (error) => {
                 console.error('WebSocket error:', error);
-                updateStatus('Connection error', '#f44336');
+                if (WS_URL.startsWith('wss://')) {
+                    // Show certificate warning for WSS connection failures
+                    document.getElementById('certWarning').style.display = 'block';
+                    document.getElementById('infoText').textContent = 'Certificate required for secure connection';
+                    updateStatus('WSS connection failed - certificate needed', '#ff9800');
+                } else {
+                    updateStatus('Connection error', '#f44336');
+                }
             };
             
             ws.onclose = () => {
                 console.log('WebSocket closed');
                 isConnected = false;
-                updateStatus('Disconnected', '#9e9e9e');
+                if (!document.getElementById('certWarning').style.display || document.getElementById('certWarning').style.display === 'none') {
+                    updateStatus('Disconnected', '#9e9e9e');
+                }
                 stopCall();
             };
         }
