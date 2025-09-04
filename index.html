@@ -565,19 +565,23 @@
                 
                 switch (message.type) {
                     case 'user-joined':
-                        addRemoteUser(message.userId);
+                        if (message.id && message.id !== userId) {
+                            addRemoteUser(message.id);
+                        }
                         break;
                     
                     case 'user-left':
-                        removeRemoteUser(message.userId);
+                        if (message.id) {
+                            removeRemoteUser(message.id);
+                        }
                         break;
                     
                     case 'participants':
                         // Handle initial participants list
                         if (message.users) {
-                            message.users.forEach(userId => {
-                                if (userId !== userId) {
-                                    addRemoteUser(userId);
+                            message.users.forEach(uid => {
+                                if (uid !== userId) {  // Compare with OUR userId
+                                    addRemoteUser(uid);
                                 }
                             });
                         }
@@ -588,9 +592,14 @@
                         break;
                     
                     case 'webp-frame':
-                        displayRemoteFrame(message);
-                        framesReceived++;
-                        bytesReceived += message.data.length;
+                    case 'frame':  // Handle both frame types
+                        if (message.from && message.from !== userId) {
+                            displayRemoteFrame(message);
+                            framesReceived++;
+                            if (message.data) {
+                                bytesReceived += message.data.length;
+                            }
+                        }
                         break;
                     
                     case 'audio':
