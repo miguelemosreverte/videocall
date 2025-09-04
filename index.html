@@ -694,10 +694,17 @@
                 if (!sendInterval) {
                     sendInterval = setTimeout(() => {
                         if (audioBuffer.length > 0) {
-                            // Convert to 16-bit PCM
-                            const pcmData = new Int16Array(audioBuffer.length);
-                            for (let i = 0; i < audioBuffer.length; i++) {
-                                pcmData[i] = Math.max(-32768, Math.min(32767, audioBuffer[i] * 32768));
+                            // Apply soft clipping to prevent harsh distortion
+                            const clippedBuffer = audioBuffer.map(sample => {
+                                // Soft clipping using tanh function
+                                return Math.tanh(sample * 0.7) / 0.7;
+                            });
+                            
+                            // Convert to 16-bit PCM with reduced gain
+                            const pcmData = new Int16Array(clippedBuffer.length);
+                            for (let i = 0; i < clippedBuffer.length; i++) {
+                                // Apply 50% gain reduction before converting
+                                pcmData[i] = Math.max(-32768, Math.min(32767, clippedBuffer[i] * 16384));
                             }
                             
                             // Convert to base64
@@ -1004,10 +1011,24 @@
                     const buffer = audioContext.createBuffer(1, floatData.length, sampleRate);
                     buffer.getChannelData(0).set(floatData);
                     
-                    // Play the buffer
+                    // Create gain node for volume control
+                    const gainNode = audioContext.createGain();
+                    gainNode.gain.value = 0.3; // Limit volume to 30% to prevent feedback
+                    
+                    // Create compressor to prevent clipping
+                    const compressor = audioContext.createDynamicsCompressor();
+                    compressor.threshold.value = -24; // Start compression at -24dB
+                    compressor.knee.value = 30;
+                    compressor.ratio.value = 12; // 12:1 compression ratio
+                    compressor.attack.value = 0.003; // 3ms attack
+                    compressor.release.value = 0.25; // 250ms release
+                    
+                    // Play the buffer with volume limiting
                     const source = audioContext.createBufferSource();
                     source.buffer = buffer;
-                    source.connect(audioContext.destination);
+                    source.connect(gainNode);
+                    gainNode.connect(compressor);
+                    compressor.connect(audioContext.destination);
                     source.start(0);
                     
                     console.log(`Playing audio from ${message.from}, samples: ${floatData.length}`);
