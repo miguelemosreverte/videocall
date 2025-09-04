@@ -603,7 +603,9 @@
                         break;
                     
                     case 'audio':
-                        playRemoteAudio(message);
+                        if (message.from && message.from !== userId) {
+                            playRemoteAudio(message);
+                        }
                         break;
                     
                     case 'ping':
@@ -667,6 +669,64 @@
             }
             
             captureFrame();
+            
+            // Start audio capture
+            startAudioCapture();
+        }
+        
+        function startAudioCapture() {
+            if (!localStream) return;
+            
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createMediaStreamSource(localStream);
+            const processor = audioContext.createScriptProcessor(4096, 1, 1);
+            
+            let audioBuffer = [];
+            let sendInterval = null;
+            
+            processor.onaudioprocess = (e) => {
+                if (!audioEnabled || !ws || ws.readyState !== WebSocket.OPEN) return;
+                
+                const inputData = e.inputBuffer.getChannelData(0);
+                audioBuffer.push(...inputData);
+                
+                // Send audio every 100ms to reduce overhead
+                if (!sendInterval) {
+                    sendInterval = setTimeout(() => {
+                        if (audioBuffer.length > 0) {
+                            // Convert to 16-bit PCM
+                            const pcmData = new Int16Array(audioBuffer.length);
+                            for (let i = 0; i < audioBuffer.length; i++) {
+                                pcmData[i] = Math.max(-32768, Math.min(32767, audioBuffer[i] * 32768));
+                            }
+                            
+                            // Convert to base64
+                            const bytes = new Uint8Array(pcmData.buffer);
+                            let binary = '';
+                            for (let i = 0; i < bytes.length; i++) {
+                                binary += String.fromCharCode(bytes[i]);
+                            }
+                            const base64 = btoa(binary);
+                            
+                            // Send audio data
+                            ws.send(JSON.stringify({
+                                type: 'audio',
+                                audioData: base64,
+                                sampleRate: audioContext.sampleRate
+                            }));
+                            
+                            audioBuffer = [];
+                        }
+                        sendInterval = null;
+                    }, 100);
+                }
+            };
+            
+            source.connect(processor);
+            processor.connect(audioContext.destination);
+            
+            // Store for cleanup
+            window.audioCapture = { source, processor, audioContext };
         }
         
         function startFeedbackLoop() {
@@ -842,7 +902,27 @@
                 const ctx = canvas.getContext('2d');
                 const img = new Image();
                 img.onload = () => {
-                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    // Clear canvas first
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    
+                    // Calculate proper aspect ratio to avoid stretching
+                    const aspectRatio = img.width / img.height;
+                    let drawWidth = canvas.width;
+                    let drawHeight = canvas.height;
+                    
+                    if (aspectRatio > canvas.width / canvas.height) {
+                        // Image is wider - fit to width
+                        drawHeight = canvas.width / aspectRatio;
+                    } else {
+                        // Image is taller - fit to height
+                        drawWidth = canvas.height * aspectRatio;
+                    }
+                    
+                    // Center the image
+                    const x = (canvas.width - drawWidth) / 2;
+                    const y = (canvas.height - drawHeight) / 2;
+                    
+                    ctx.drawImage(img, x, y, drawWidth, drawHeight);
                 };
                 img.src = 'data:image/webp;base64,' + message.data;
             }
@@ -858,8 +938,12 @@
             
             const canvas = document.createElement('canvas');
             canvas.id = `canvas-${userId}`;
-            canvas.width = 640;
+            // Use 16:9 aspect ratio to match container
+            canvas.width = 854;
             canvas.height = 480;
+            canvas.style.width = '100%';
+            canvas.style.height = '100%';
+            canvas.style.objectFit = 'contain';
             
             const qualityIndicator = document.createElement('div');
             qualityIndicator.className = 'quality-indicator';
@@ -881,9 +965,41 @@
             }
         }
         
+        // Audio context for playback
+        let audioContext = null;
+        const audioQueues = new Map(); // Store audio data per user
+        
+        function initAudioContext() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+        
         function playRemoteAudio(message) {
-            // Simple audio playback - can be enhanced with Web Audio API
-            console.log('Audio from user:', message.from || message.From);
+            if (!message.from || message.from === userId) return;
+            
+            initAudioContext();
+            
+            if (message.audioData) {
+                // Decode base64 audio data
+                const audioData = atob(message.audioData);
+                const arrayBuffer = new ArrayBuffer(audioData.length);
+                const uint8Array = new Uint8Array(arrayBuffer);
+                
+                for (let i = 0; i < audioData.length; i++) {
+                    uint8Array[i] = audioData.charCodeAt(i);
+                }
+                
+                // Decode and play audio
+                audioContext.decodeAudioData(arrayBuffer, (buffer) => {
+                    const source = audioContext.createBufferSource();
+                    source.buffer = buffer;
+                    source.connect(audioContext.destination);
+                    source.start(0);
+                }, (error) => {
+                    console.error('Audio decode error:', error);
+                });
+            }
         }
         
         function setupControls() {
