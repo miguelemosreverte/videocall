@@ -473,6 +473,8 @@
         let adaptiveEnabled = true;
         let currentQuality = 2; // Start with 360p
         let requestedQuality = null;
+        let qualityHistory = [2, 2, 2]; // Track quality over time for smoothing
+        let qualityChangeCount = 0;
         
         // Performance metrics
         let framesSent = 0;
@@ -685,7 +687,10 @@
             let sendInterval = null;
             
             processor.onaudioprocess = (e) => {
-                if (!audioEnabled || !ws || ws.readyState !== WebSocket.OPEN) return;
+                if (!audioEnabled || !ws || ws.readyState !== WebSocket.OPEN) {
+                    audioBuffer = []; // Clear buffer when not sending
+                    return;
+                }
                 
                 const inputData = e.inputBuffer.getChannelData(0);
                 audioBuffer.push(...inputData);
@@ -817,11 +822,25 @@
             console.log('Quality changed to:', message.quality);
             
             // Update current quality
+            let targetQuality = currentQuality;
             for (let i = 0; i < QUALITY_PRESETS.length; i++) {
                 if (QUALITY_PRESETS[i].name === message.quality) {
-                    currentQuality = i;
+                    targetQuality = i;
                     break;
                 }
+            }
+            
+            // Add to history and smooth changes
+            qualityHistory.push(targetQuality);
+            if (qualityHistory.length > 5) qualityHistory.shift();
+            
+            // Calculate average quality for smoothing
+            const avgQuality = Math.round(qualityHistory.reduce((a, b) => a + b, 0) / qualityHistory.length);
+            
+            // Only change if we've converged on a new quality
+            if (Math.abs(avgQuality - currentQuality) >= 1 && qualityChangeCount++ > 2) {
+                currentQuality = avgQuality;
+                qualityChangeCount = 0;
             }
             
             // Update UI
@@ -930,6 +949,9 @@
                     const x = (canvas.width - drawWidth) / 2;
                     const y = (canvas.height - drawHeight) / 2;
                     
+                    // Fill background with black for letterboxing/pillarboxing
+                    ctx.fillStyle = '#000';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
                     ctx.drawImage(img, x, y, drawWidth, drawHeight);
                 };
                 img.src = 'data:image/webp;base64,' + message.data;
@@ -946,9 +968,9 @@
             
             const canvas = document.createElement('canvas');
             canvas.id = `canvas-${userId}`;
-            // Use 16:9 aspect ratio to match container
-            canvas.width = 854;
-            canvas.height = 480;
+            // Use flexible sizing that can handle any aspect ratio
+            canvas.width = 640;
+            canvas.height = 640; // Square canvas to handle both orientations
             canvas.style.width = '100%';
             canvas.style.height = '100%';
             canvas.style.objectFit = 'contain';
@@ -988,7 +1010,12 @@
             
             initAudioContext();
             
-            if (message.audioData) {
+            // Resume audio context if suspended (browser requirement)
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+            
+            if (message.audioData && message.audioData.length > 0) {
                 try {
                     // Decode base64 to binary
                     const binaryString = atob(message.audioData);
@@ -1031,7 +1058,7 @@
                     compressor.connect(audioContext.destination);
                     source.start(0);
                     
-                    console.log(`Playing audio from ${message.from}, samples: ${floatData.length}`);
+                    console.log(`Playing audio from ${message.from}, samples: ${floatData.length}, state: ${audioContext.state}`);
                 } catch (error) {
                     console.error('Audio playback error:', error);
                 }
@@ -1083,6 +1110,15 @@
                 }
             };
         }
+        
+        // Resume audio on user interaction (browser requirement)
+        document.addEventListener('click', () => {
+            if (audioContext && audioContext.state === 'suspended') {
+                audioContext.resume().then(() => {
+                    console.log('Audio context resumed after user interaction');
+                });
+            }
+        });
         
         // Start the application
         init();
