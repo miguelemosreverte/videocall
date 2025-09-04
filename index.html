@@ -723,7 +723,8 @@
             };
             
             source.connect(processor);
-            processor.connect(audioContext.destination);
+            // Don't connect processor to destination to avoid echo
+            processor.connect(audioContext.createGain()); // Connect to dummy node
             
             // Store for cleanup
             window.audioCapture = { source, processor, audioContext };
@@ -981,24 +982,38 @@
             initAudioContext();
             
             if (message.audioData) {
-                // Decode base64 audio data
-                const audioData = atob(message.audioData);
-                const arrayBuffer = new ArrayBuffer(audioData.length);
-                const uint8Array = new Uint8Array(arrayBuffer);
-                
-                for (let i = 0; i < audioData.length; i++) {
-                    uint8Array[i] = audioData.charCodeAt(i);
-                }
-                
-                // Decode and play audio
-                audioContext.decodeAudioData(arrayBuffer, (buffer) => {
+                try {
+                    // Decode base64 to binary
+                    const binaryString = atob(message.audioData);
+                    const bytes = new Uint8Array(binaryString.length);
+                    for (let i = 0; i < binaryString.length; i++) {
+                        bytes[i] = binaryString.charCodeAt(i);
+                    }
+                    
+                    // Convert bytes back to Int16Array (PCM data)
+                    const pcmData = new Int16Array(bytes.buffer);
+                    
+                    // Convert PCM to Float32 for Web Audio
+                    const floatData = new Float32Array(pcmData.length);
+                    for (let i = 0; i < pcmData.length; i++) {
+                        floatData[i] = pcmData[i] / 32768; // Convert to -1 to 1 range
+                    }
+                    
+                    // Create audio buffer
+                    const sampleRate = message.sampleRate || 48000;
+                    const buffer = audioContext.createBuffer(1, floatData.length, sampleRate);
+                    buffer.getChannelData(0).set(floatData);
+                    
+                    // Play the buffer
                     const source = audioContext.createBufferSource();
                     source.buffer = buffer;
                     source.connect(audioContext.destination);
                     source.start(0);
-                }, (error) => {
-                    console.error('Audio decode error:', error);
-                });
+                    
+                    console.log(`Playing audio from ${message.from}, samples: ${floatData.length}`);
+                } catch (error) {
+                    console.error('Audio playback error:', error);
+                }
             }
         }
         
