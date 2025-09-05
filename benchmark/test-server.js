@@ -40,10 +40,11 @@ wss.on('connection', (ws) => {
                     }
                 });
                 
-                // Also echo back to sender for latency measurement
+                // Echo back to sender for latency measurement with frame number
                 ws.send(JSON.stringify({
                     type: 'frame',
                     sentAt: message.sentAt,
+                    frameNumber: message.frameNumber,
                     echo: true
                 }));
             } else if (message.type === 'join') {
