@@ -212,7 +212,18 @@
                 
                 clientA.onerror = (error) => {
                     log('Client A connection error: ' + error, 'error');
+                    clientA = null;
                     resolve(false);
+                };
+                
+                clientA.onclose = () => {
+                    log('Client A connection closed', 'warning');
+                    clientA = null;
+                };
+                
+                clientB.onclose = () => {
+                    log('Client B connection closed', 'warning');
+                    clientB = null;
                 };
             });
         }
@@ -220,6 +231,16 @@
         function setupMessageHandlers() {
             // Store ping timestamps
             const pingTimestamps = new Map();
+            
+            // Keep connections alive with periodic pings
+            setInterval(() => {
+                if (clientA && clientA.readyState === WebSocket.OPEN) {
+                    clientA.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
+                }
+                if (clientB && clientB.readyState === WebSocket.OPEN) {
+                    clientB.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
+                }
+            }, 30000); // Every 30 seconds
             
             clientB.onmessage = (event) => {
                 try {
@@ -256,14 +277,14 @@
                                 const fromStr = message.from.toString();
                                 
                                 // Our test frames have quality: 'test' and timestamp field
-                                if (message.quality === 'test' || (message.timestamp && message.quality === 'test')) {
+                                if (message.quality === 'test') {
                                     // This is definitely our test frame
                                     metrics.B.framesReceived++;
                                     updateMetrics();
                                     displayFrame('canvasB', message.data, `Test Client`);
                                     
                                     if (message.timestamp) {
-                                        const frameLatency = Date.now() - message.timestamp;
+                                        const frameLatency = Date.now() - parseInt(message.timestamp);
                                         // Only log first few to avoid spam
                                         if (metrics.B.framesReceived <= 5) {
                                             log(`Test frame received, latency: ${frameLatency}ms`, 'info');
@@ -441,7 +462,7 @@
                             type: 'frame',
                             data: base64,
                             quality: 'test',
-                            timestamp: now
+                            timestamp: now.toString()
                         }));
                         metrics.A.framesSent++;
                         updateMetrics();
@@ -450,14 +471,16 @@
                 }, 'image/jpeg', 0.8);
             }, 100); // 10 FPS
             
-            // Stop after 5 seconds if running individual test
-            setTimeout(() => {
-                if (videoInterval) {
-                    clearInterval(videoInterval);
-                    videoInterval = null;
-                    log(`Video test complete. Sent ${metrics.A.framesSent} frames`, 'success');
-                }
-            }, 5000);
+            // Don't auto-stop when running as part of test suite
+            if (typeof stopAfter !== 'undefined' && stopAfter) {
+                setTimeout(() => {
+                    if (videoInterval) {
+                        clearInterval(videoInterval);
+                        videoInterval = null;
+                        log(`Video test complete. Sent ${metrics.A.framesSent} frames`, 'success');
+                    }
+                }, 5000);
+            }
         }
 
         async function testAudio() {
@@ -579,8 +602,15 @@
             await new Promise(r => setTimeout(r, 1000));
             
             // Start continuous video (will run for 5 seconds)
+            window.stopAfter = true;
             await testVideo();
             await new Promise(r => setTimeout(r, 5500));
+            
+            // Clear video interval if still running
+            if (videoInterval) {
+                clearInterval(videoInterval);
+                videoInterval = null;
+            }
             
             // Test audio multiple times
             for (let i = 0; i < 5; i++) {
