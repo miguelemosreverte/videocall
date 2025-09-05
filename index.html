@@ -101,7 +101,11 @@
         }
         
         #localVideo {
-            display: none;
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+            pointer-events: none;
         }
         
         .quality-indicator {
@@ -269,11 +273,14 @@
                 ws.onopen = () => {
                     statusEl.textContent = 'Connected - Audio Priority Active';
                     
+                    // Generate and store user ID
+                    ws.userId = 'user-' + Math.random().toString(36).substr(2, 9);
+                    
                     // Join global room
                     ws.send(JSON.stringify({
                         type: 'join',
                         room: 'global',
-                        userId: 'user-' + Math.random().toString(36).substr(2, 9)
+                        userId: ws.userId
                     }));
                     
                     resolve();
@@ -283,8 +290,13 @@
                     try {
                         const packet = JSON.parse(event.data);
                         
-                        // Handle quad-tree packets
+                        // Handle quad-tree packets from OTHER users only
                         if (packet.t === 'delta' || packet.t === 'key') {
+                            // Skip own frames
+                            if (packet.from === ws.userId || packet.userId === ws.userId) {
+                                return;
+                            }
+                            
                             if (!decoder) {
                                 decoder = new QuadTreeDecoder(remoteCanvas);
                                 await decoder.initAudio();
@@ -364,6 +376,16 @@
             // Initialize encoder with audio priority
             encoder = new QuadTreeEncoder(localVideo, localCanvas);
             await encoder.initAudio(localStream);
+            
+            // Start rendering local video to canvas
+            const localCtx = localCanvas.getContext('2d');
+            const renderLocal = () => {
+                if (isStreaming && localVideo.readyState === 4) {
+                    localCtx.drawImage(localVideo, 0, 0, localCanvas.width, localCanvas.height);
+                }
+                requestAnimationFrame(renderLocal);
+            };
+            renderLocal();
             
             // Start sending frames at 60 FPS
             isStreaming = true;
