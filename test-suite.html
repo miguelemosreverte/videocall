@@ -218,6 +218,9 @@
         }
 
         function setupMessageHandlers() {
+            // Store ping timestamps
+            const pingTimestamps = new Map();
+            
             clientB.onmessage = (event) => {
                 try {
                     const message = JSON.parse(event.data);
@@ -225,9 +228,15 @@
                     switch(message.type) {
                         case 'frame':
                         case 'webp-frame':
-                            metrics.B.framesReceived++;
-                            updateMetrics();
-                            displayFrame('canvasB', message.data);
+                            // Only count frames from the other client
+                            if (message.from === 'testA') {
+                                metrics.B.framesReceived++;
+                                updateMetrics();
+                                displayFrame('canvasB', message.data);
+                            } else if (message.from === 'testB') {
+                                // This is our own frame being echoed back - don't count
+                                log(`Warning: Received own frame back`, 'warning');
+                            }
                             break;
                         
                         case 'audio':
@@ -240,11 +249,26 @@
                             log(`User joined: ${message.id}`, 'info');
                             break;
                         
+                        case 'ping':
+                            // Server forwarded a ping from client A, respond with pong
+                            if (message.from && message.from !== 'testB') {
+                                clientB.send(JSON.stringify({
+                                    type: 'pong',
+                                    originalTimestamp: message.timestamp,
+                                    responseTime: Date.now()
+                                }));
+                            }
+                            break;
+                        
                         case 'pong':
-                            const latency = Date.now() - parseInt(message.timestamp);
-                            metrics.B.latency = latency;
-                            updateMetrics();
-                            log(`Latency measured: ${latency}ms`, 'info');
+                            // Calculate latency from stored timestamp
+                            if (message.originalTimestamp && pingTimestamps.has(message.originalTimestamp)) {
+                                const latency = Date.now() - pingTimestamps.get(message.originalTimestamp);
+                                metrics.B.latency = latency;
+                                updateMetrics();
+                                log(`Latency measured: ${latency}ms`, 'info');
+                                pingTimestamps.delete(message.originalTimestamp);
+                            }
                             break;
                     }
                 } catch (e) {
@@ -252,12 +276,30 @@
                 }
             };
             
+            // Store ping timestamps for client A
+            const pingTimestampsA = new Map();
+            
             clientA.onmessage = (event) => {
                 try {
                     const message = JSON.parse(event.data);
-                    if (message.type === 'pong') {
-                        metrics.A.latency = Date.now() - message.timestamp;
-                        updateMetrics();
+                    
+                    switch(message.type) {
+                        case 'frame':
+                        case 'webp-frame':
+                            // Client A shouldn't receive its own frames back
+                            if (message.from && message.from !== 'testA') {
+                                log(`Warning: Client A received unexpected frame from ${message.from}`, 'warning');
+                            }
+                            break;
+                            
+                        case 'pong':
+                            // Simple round-trip time calculation
+                            if (message.originalTimestamp) {
+                                const rtt = Date.now() - message.originalTimestamp;
+                                metrics.A.latency = Math.round(rtt / 2); // One-way latency estimate
+                                updateMetrics();
+                            }
+                            break;
                     }
                 } catch (e) {
                     console.error('Message parse error:', e);
@@ -371,26 +413,52 @@
             
             log('Testing latency...', 'info');
             
-            const timestamps = [];
+            // Simple echo test - measure round trip time
+            const latencies = [];
             let count = 0;
             
-            const interval = setInterval(() => {
-                const timestamp = Date.now();
+            const measureLatency = () => {
+                const startTime = Date.now();
+                
+                // Create a unique ID for this ping
+                const pingId = Math.random().toString(36).substr(2, 9);
+                
+                // Set up one-time listener for this specific ping
+                const tempHandler = (event) => {
+                    try {
+                        const message = JSON.parse(event.data);
+                        if (message.type === 'pong' && message.pingId === pingId) {
+                            const rtt = Date.now() - startTime;
+                            latencies.push(rtt);
+                            metrics.A.latency = rtt;
+                            updateMetrics();
+                            log(`RTT: ${rtt}ms`, 'info');
+                            
+                            clientA.removeEventListener('message', tempHandler);
+                            
+                            count++;
+                            if (count < 5) {
+                                setTimeout(measureLatency, 200);
+                            } else {
+                                // Calculate average
+                                const avg = Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length);
+                                log(`Average RTT: ${avg}ms (one-way estimate: ${Math.round(avg/2)}ms)`, 'success');
+                            }
+                        }
+                    } catch (e) {}
+                };
+                
+                clientA.addEventListener('message', tempHandler);
+                
+                // Send ping with unique ID
                 clientA.send(JSON.stringify({
                     type: 'ping',
-                    timestamp: timestamp
+                    timestamp: startTime,
+                    pingId: pingId
                 }));
-                
-                count++;
-                if (count >= 10) {
-                    clearInterval(interval);
-                    
-                    setTimeout(() => {
-                        const avg = (metrics.A.latency + metrics.B.latency) / 2;
-                        log(`Average latency: ${avg}ms`, 'success');
-                    }, 1000);
-                }
-            }, 100);
+            };
+            
+            measureLatency();
         }
 
         async function runAllTests() {
