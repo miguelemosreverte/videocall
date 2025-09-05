@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Production 4K@60fps Test</title>
+    <style>
+        body {
+            font-family: 'SF Mono', Monaco, monospace;
+            background: #1a1a1a;
+            color: #0f0;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            color: #0f0;
+            text-shadow: 0 0 10px #0f0;
+        }
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+            padding: 20px;
+            background: rgba(0, 255, 0, 0.1);
+            border: 1px solid #0f0;
+            border-radius: 10px;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+        }
+        label {
+            margin-bottom: 5px;
+            font-size: 0.9em;
+            color: #0f0;
+        }
+        select, input, button {
+            padding: 8px;
+            background: #000;
+            color: #0f0;
+            border: 1px solid #0f0;
+            border-radius: 5px;
+            font-family: monospace;
+        }
+        button {
+            cursor: pointer;
+            margin: 5px;
+            transition: all 0.3s;
+        }
+        button:hover {
+            background: #0f0;
+            color: #000;
+            box-shadow: 0 0 10px #0f0;
+        }
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .metric {
+            background: rgba(0, 0, 0, 0.8);
+            border: 1px solid #0f0;
+            padding: 15px;
+            border-radius: 5px;
+        }
+        .metric-label {
+            font-size: 0.8em;
+            color: #888;
+        }
+        .metric-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #0f0;
+            text-shadow: 0 0 5px #0f0;
+        }
+        .warning {
+            color: #ff0;
+        }
+        .error {
+            color: #f00;
+        }
+        .success {
+            color: #0f0;
+        }
+        #localVideo, #remoteVideo {
+            width: 100%;
+            max-width: 640px;
+            height: auto;
+            border: 2px solid #0f0;
+            border-radius: 5px;
+            margin: 10px;
+            background: #000;
+        }
+        .video-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin: 20px 0;
+        }
+        #log {
+            background: #000;
+            border: 1px solid #0f0;
+            padding: 10px;
+            height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 0.9em;
+            white-space: pre-wrap;
+        }
+        .reality-check {
+            background: rgba(255, 0, 0, 0.1);
+            border: 2px solid #f00;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 10px;
+        }
+        .reality-check h2 {
+            color: #f00;
+            text-shadow: 0 0 5px #f00;
+        }
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        .comparison-table th, .comparison-table td {
+            padding: 10px;
+            border: 1px solid #0f0;
+            text-align: left;
+        }
+        .comparison-table th {
+            background: rgba(0, 255, 0, 0.2);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎥 PRODUCTION 4K@60FPS REALITY TEST</h1>
+        
+        <div class="reality-check">
+            <h2>⚠️ REALITY CHECK</h2>
+            <p>This tests ACTUAL video streaming, not synthetic benchmarks:</p>
+            <ul>
+                <li>Real camera capture (not pre-generated frames)</li>
+                <li>Real-time encoding (not pre-compressed)</li>
+                <li>WebSocket transmission (not batched)</li>
+                <li>Actual network conditions</li>
+            </ul>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <label>Resolution</label>
+                <select id="resolution">
+                    <option value="640x480">VGA (640x480)</option>
+                    <option value="1280x720" selected>HD (1280x720)</option>
+                    <option value="1920x1080">Full HD (1920x1080)</option>
+                    <option value="2560x1440">QHD (2560x1440)</option>
+                    <option value="3840x2160">4K (3840x2160)</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Frame Rate</label>
+                <select id="framerate">
+                    <option value="15">15 FPS</option>
+                    <option value="30" selected>30 FPS</option>
+                    <option value="60">60 FPS</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Quality</label>
+                <select id="quality">
+                    <option value="0.3">Low (30%)</option>
+                    <option value="0.5">Medium (50%)</option>
+                    <option value="0.7" selected>High (70%)</option>
+                    <option value="0.9">Ultra (90%)</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Encoding</label>
+                <select id="encoding">
+                    <option value="jpeg">JPEG (current)</option>
+                    <option value="webp">WebP (better)</option>
+                    <option value="h264" disabled>H.264 (WebRTC)</option>
+                </select>
+            </div>
+        </div>
+
+        <div style="text-align: center;">
+            <button onclick="startProductionTest()">▶️ Start Production Test</button>
+            <button onclick="stopTest()">⏹️ Stop Test</button>
+            <button onclick="compareWithBenchmark()">📊 Compare with Benchmark</button>
+        </div>
+
+        <div class="metrics">
+            <div class="metric">
+                <div class="metric-label">Actual FPS</div>
+                <div class="metric-value" id="fps">0</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Target FPS</div>
+                <div class="metric-value" id="targetFps">30</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Frames Sent</div>
+                <div class="metric-value" id="framesSent">0</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Data Rate</div>
+                <div class="metric-value" id="dataRate">0 MB/s</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Latency</div>
+                <div class="metric-value" id="latency">0 ms</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">CPU Usage</div>
+                <div class="metric-value" id="cpu">0%</div>
+            </div>
+        </div>
+
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Metric</th>
+                    <th>Benchmark (Synthetic)</th>
+                    <th>Production (Real)</th>
+                    <th>Reality Gap</th>
+                </tr>
+            </thead>
+            <tbody id="comparisonBody">
+                <tr>
+                    <td>4K@60fps Achievement</td>
+                    <td class="success">60.39 FPS (101%)</td>
+                    <td id="prod4k60">-</td>
+                    <td id="gap4k60">-</td>
+                </tr>
+                <tr>
+                    <td>Data Throughput</td>
+                    <td>0.55 MB (compressed)</td>
+                    <td id="prodData">-</td>
+                    <td id="gapData">-</td>
+                </tr>
+                <tr>
+                    <td>Latency</td>
+                    <td>0.56 ms</td>
+                    <td id="prodLatency">-</td>
+                    <td id="gapLatency">-</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="video-container">
+            <div>
+                <h3>Local Stream</h3>
+                <video id="localVideo" autoplay muted></video>
+            </div>
+            <div>
+                <h3>Remote Stream (Echo)</h3>
+                <video id="remoteVideo" autoplay></video>
+            </div>
+        </div>
+
+        <div id="log"></div>
+    </div>
+
+    <canvas id="canvas" style="display: none;"></canvas>
+
+    <script>
+        const WS_URL = window.location.protocol === 'https:' 
+            ? 'wss://91.99.159.21.nip.io/ws'
+            : 'ws://localhost:3001';
+
+        let ws = null;
+        let localStream = null;
+        let isRunning = false;
+        let frameCount = 0;
+        let startTime = null;
+        let lastFrameTime = null;
+        let captureInterval = null;
+        let bytesTransferred = 0;
+        let latencies = [];
+
+        function log(message, type = 'info') {
+            const logEl = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            const color = type === 'error' ? '#f00' : 
+                         type === 'warning' ? '#ff0' : 
+                         type === 'success' ? '#0f0' : '#0f0';
+            logEl.innerHTML += `<span style="color: ${color}">[${timestamp}] ${message}</span>\n`;
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        async function startProductionTest() {
+            if (isRunning) return;
+            
+            const resolution = document.getElementById('resolution').value.split('x');
+            const width = parseInt(resolution[0]);
+            const height = parseInt(resolution[1]);
+            const framerate = parseInt(document.getElementById('framerate').value);
+            const quality = parseFloat(document.getElementById('quality').value);
+            
+            log(`Starting production test: ${width}x${height} @ ${framerate}fps`, 'info');
+            
+            // Update target FPS display
+            document.getElementById('targetFps').textContent = framerate;
+            
+            try {
+                // Get camera stream with exact constraints
+                const constraints = {
+                    video: {
+                        width: { exact: width },
+                        height: { exact: height },
+                        frameRate: { ideal: framerate, max: framerate }
+                    },
+                    audio: false
+                };
+                
+                localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                document.getElementById('localVideo').srcObject = localStream;
+                
+                // Get actual capabilities
+                const videoTrack = localStream.getVideoTracks()[0];
+                const settings = videoTrack.getSettings();
+                log(`Actual capture: ${settings.width}x${settings.height} @ ${settings.frameRate}fps`, 'success');
+                
+                // Connect WebSocket
+                await connectWebSocket();
+                
+                // Start capturing and sending frames
+                startFrameCapture(quality, framerate);
+                
+                isRunning = true;
+                frameCount = 0;
+                bytesTransferred = 0;
+                startTime = Date.now();
+                lastFrameTime = startTime;
+                
+                // Monitor performance
+                setInterval(updateMetrics, 1000);
+                
+            } catch (error) {
+                log(`Failed to start: ${error.message}`, 'error');
+                
+                // Try with lower constraints
+                if (width > 1920) {
+                    log('4K not supported by camera, trying Full HD...', 'warning');
+                    document.getElementById('resolution').value = '1920x1080';
+                    setTimeout(startProductionTest, 100);
+                }
+            }
+        }
+
+        function connectWebSocket() {
+            return new Promise((resolve, reject) => {
+                ws = new WebSocket(WS_URL);
+                
+                ws.onopen = () => {
+                    log('WebSocket connected', 'success');
+                    ws.send(JSON.stringify({
+                        type: 'join',
+                        room: 'production-test',
+                        userId: 'prod-' + Date.now()
+                    }));
+                    resolve();
+                };
+                
+                ws.onerror = (error) => {
+                    log('WebSocket error', 'error');
+                    reject(error);
+                };
+                
+                ws.onmessage = (event) => {
+                    try {
+                        const message = JSON.parse(event.data);
+                        if (message.type === 'frame' && message.echo) {
+                            const now = Date.now();
+                            const latency = now - message.sentAt;
+                            latencies.push(latency);
+                            
+                            // Display echo frame (simulating remote user)
+                            if (message.data) {
+                                const img = new Image();
+                                img.onload = () => {
+                                    const remoteVideo = document.getElementById('remoteVideo');
+                                    // This is simplified - in real WebRTC we'd use video element
+                                };
+                                img.src = 'data:image/jpeg;base64,' + message.data;
+                            }
+                        }
+                    } catch (e) {
+                        // Ignore
+                    }
+                };
+            });
+        }
+
+        function startFrameCapture(quality, targetFps) {
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+            const video = document.getElementById('localVideo');
+            
+            // Set canvas size from video
+            canvas.width = video.videoWidth || 1280;
+            canvas.height = video.videoHeight || 720;
+            
+            const frameInterval = 1000 / targetFps;
+            let lastCaptureTime = Date.now();
+            
+            // Use requestAnimationFrame for smooth capture
+            function captureFrame() {
+                if (!isRunning) return;
+                
+                const now = Date.now();
+                
+                // Check if it's time for next frame
+                if (now - lastCaptureTime >= frameInterval) {
+                    // Draw current video frame to canvas
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    
+                    // Convert to JPEG
+                    canvas.toBlob((blob) => {
+                        if (blob && ws && ws.readyState === WebSocket.OPEN) {
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                                const base64 = reader.result.split(',')[1];
+                                const frameData = {
+                                    type: 'frame',
+                                    data: base64,
+                                    sentAt: Date.now(),
+                                    frameNumber: frameCount
+                                };
+                                
+                                ws.send(JSON.stringify(frameData));
+                                frameCount++;
+                                bytesTransferred += blob.size;
+                            };
+                            reader.readAsDataURL(blob);
+                        }
+                    }, 'image/jpeg', quality);
+                    
+                    lastCaptureTime = now;
+                }
+                
+                // Continue capturing
+                requestAnimationFrame(captureFrame);
+            }
+            
+            // Start capture loop
+            requestAnimationFrame(captureFrame);
+        }
+
+        function updateMetrics() {
+            if (!isRunning) return;
+            
+            const now = Date.now();
+            const elapsed = (now - startTime) / 1000;
+            const fps = frameCount / elapsed;
+            
+            document.getElementById('fps').textContent = fps.toFixed(1);
+            document.getElementById('framesSent').textContent = frameCount;
+            
+            const dataRate = (bytesTransferred / elapsed / 1048576).toFixed(2);
+            document.getElementById('dataRate').textContent = dataRate + ' MB/s';
+            
+            if (latencies.length > 0) {
+                const avgLatency = latencies.reduce((a, b) => a + b, 0) / latencies.length;
+                document.getElementById('latency').textContent = avgLatency.toFixed(1) + ' ms';
+            }
+            
+            // Update production metrics in comparison table
+            const targetFps = parseInt(document.getElementById('framerate').value);
+            const resolution = document.getElementById('resolution').value;
+            
+            if (resolution === '3840x2160' && targetFps === 60) {
+                const achievement = (fps / 60 * 100).toFixed(0);
+                const fpsDisplay = `${fps.toFixed(1)} FPS (${achievement}%)`;
+                document.getElementById('prod4k60').textContent = fpsDisplay;
+                document.getElementById('prod4k60').className = fps >= 60 ? 'success' : fps >= 30 ? 'warning' : 'error';
+                
+                const gap = (60.39 - fps).toFixed(1);
+                document.getElementById('gap4k60').textContent = `-${gap} FPS`;
+                document.getElementById('gap4k60').className = 'error';
+            }
+            
+            document.getElementById('prodData').textContent = `${(bytesTransferred / elapsed / 1048576).toFixed(2)} MB/s`;
+            
+            // Color code FPS
+            const fpsEl = document.getElementById('fps');
+            fpsEl.className = fps >= targetFps ? 'metric-value success' : 
+                             fps >= targetFps * 0.8 ? 'metric-value warning' : 
+                             'metric-value error';
+        }
+
+        function stopTest() {
+            isRunning = false;
+            
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+            
+            log('Test stopped', 'info');
+        }
+
+        function compareWithBenchmark() {
+            log('\n=== BENCHMARK vs PRODUCTION COMPARISON ===', 'warning');
+            log('Benchmark (synthetic): 4K@60fps = 60.39 FPS ✅', 'success');
+            
+            const actualFps = parseFloat(document.getElementById('fps').textContent);
+            const targetFps = parseInt(document.getElementById('framerate').value);
+            const achievement = (actualFps / targetFps * 100).toFixed(0);
+            
+            log(`Production (real): ${actualFps.toFixed(1)} FPS (${achievement}% of ${targetFps}fps)`, 
+                actualFps >= targetFps ? 'success' : 'error');
+            
+            log('\nKey Differences:', 'warning');
+            log('1. Benchmark used pre-generated frames (no capture overhead)', 'info');
+            log('2. Benchmark used pre-compression (no real-time encoding)', 'info');
+            log('3. Benchmark used batch sending (not frame-by-frame)', 'info');
+            log('4. Production has camera limitations (many don\'t support 4K@60)', 'info');
+            log('5. Production has real-time constraints (can\'t pre-process)', 'info');
+            
+            log('\nReality: True 4K@60fps requires:', 'warning');
+            log('- Hardware encoding (GPU acceleration)', 'info');
+            log('- WebRTC with proper codec (VP9/H.264)', 'info');
+            log('- Professional camera supporting 4K@60', 'info');
+            log('- Optimized network stack', 'info');
+        }
+    </script>
+</body>
+</html>
