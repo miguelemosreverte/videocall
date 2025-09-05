@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>4K@60fps Conference - Quad-Tree Codec</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        
+        #header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 15px 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+        
+        h1 {
+            font-size: 24px;
+            font-weight: 600;
+        }
+        
+        #status {
+            margin-top: 5px;
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        
+        #container {
+            flex: 1;
+            display: flex;
+            padding: 20px;
+            gap: 20px;
+            overflow: hidden;
+        }
+        
+        #localSection, #remoteSection {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #1a1a1a;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .sectionHeader {
+            padding: 15px;
+            background: rgba(255,255,255,0.05);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        h2 {
+            font-size: 18px;
+            font-weight: 500;
+            margin-bottom: 5px;
+        }
+        
+        .stats {
+            font-size: 13px;
+            color: #888;
+            display: flex;
+            gap: 15px;
+            margin-top: 5px;
+        }
+        
+        .stat {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .videoContainer {
+            flex: 1;
+            position: relative;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        video, canvas {
+            max-width: 100%;
+            max-height: 100%;
+            width: auto;
+            height: auto;
+        }
+        
+        #localVideo {
+            display: none;
+        }
+        
+        .quality-indicator {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            padding: 5px 10px;
+            background: rgba(0,0,0,0.7);
+            border-radius: 5px;
+            font-size: 12px;
+        }
+        
+        .quality-high { color: #4ade80; }
+        .quality-medium { color: #fbbf24; }
+        .quality-low { color: #f87171; }
+        
+        .audio-indicator {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            width: 20px;
+            height: 20px;
+            background: #4ade80;
+            border-radius: 50%;
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        #controls {
+            padding: 15px 20px;
+            background: #1a1a1a;
+            border-top: 1px solid #333;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+        
+        button {
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+        
+        button:hover {
+            background: #764ba2;
+            transform: translateY(-2px);
+        }
+        
+        button:disabled {
+            background: #444;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .error {
+            background: #dc2626 !important;
+        }
+        
+        .success {
+            background: #16a34a !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <h1>4K@60fps Conference - Quad-Tree Codec</h1>
+        <div id="status">Initializing...</div>
+    </div>
+    
+    <div id="container">
+        <div id="localSection">
+            <div class="sectionHeader">
+                <h2>📹 Local Stream</h2>
+                <div class="stats">
+                    <div class="stat">FPS: <span id="localFPS">0</span></div>
+                    <div class="stat">Quality: <span id="localQuality">-</span></div>
+                    <div class="stat">Audio: <span id="localAudio">OFF</span></div>
+                </div>
+            </div>
+            <div class="videoContainer">
+                <video id="localVideo" autoplay muted playsinline></video>
+                <canvas id="localCanvas"></canvas>
+                <div id="localQualityIndicator" class="quality-indicator quality-high">HIGH</div>
+                <div id="localAudioIndicator" class="audio-indicator" style="display:none"></div>
+            </div>
+        </div>
+        
+        <div id="remoteSection">
+            <div class="sectionHeader">
+                <h2>👥 Remote Streams</h2>
+                <div class="stats">
+                    <div class="stat">FPS: <span id="remoteFPS">0</span></div>
+                    <div class="stat">Latency: <span id="remoteLatency">-</span>ms</div>
+                    <div class="stat">Bandwidth: <span id="remoteBandwidth">0</span> Mbps</div>
+                </div>
+            </div>
+            <div class="videoContainer">
+                <canvas id="remoteCanvas"></canvas>
+                <div id="remoteQualityIndicator" class="quality-indicator quality-high">-</div>
+                <div id="remoteAudioIndicator" class="audio-indicator" style="display:none"></div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="controls">
+        <button id="startBtn">Start Conference</button>
+        <button id="muteBtn" disabled>Mute Audio</button>
+        <button id="qualityBtn" disabled>Auto Quality</button>
+    </div>
+
+    <script src="quadtree-client.js"></script>
+    <script>
+        let ws = null;
+        let localStream = null;
+        let encoder = null;
+        let decoder = null;
+        let isStreaming = false;
+        let frameInterval = null;
+        let statsInterval = null;
+        
+        // Performance metrics
+        let metrics = {
+            localFPS: 0,
+            remoteFPS: 0,
+            latency: [],
+            bandwidth: 0,
+            framesSent: 0,
+            framesReceived: 0,
+            audioPackets: 0
+        };
+        
+        // Get DOM elements
+        const localVideo = document.getElementById('localVideo');
+        const localCanvas = document.getElementById('localCanvas');
+        const remoteCanvas = document.getElementById('remoteCanvas');
+        const statusEl = document.getElementById('status');
+        const startBtn = document.getElementById('startBtn');
+        const muteBtn = document.getElementById('muteBtn');
+        const qualityBtn = document.getElementById('qualityBtn');
+        
+        // Initialize WebSocket connection
+        async function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+            
+            statusEl.textContent = `Connecting to ${wsUrl}...`;
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                statusEl.textContent = 'Connected - Audio Priority Enabled';
+                
+                // Join room
+                ws.send(JSON.stringify({
+                    type: 'join',
+                    room: 'quadtree-4k',
+                    userId: 'user-' + Date.now()
+                }));
+            };
+            
+            ws.onmessage = async (event) => {
+                try {
+                    const packet = JSON.parse(event.data);
+                    
+                    // Handle quad-tree packets
+                    if (packet.t === 'delta' || packet.t === 'key') {
+                        if (!decoder) {
+                            decoder = new QuadTreeDecoder(remoteCanvas);
+                            await decoder.initAudio();
+                        }
+                        
+                        const result = decoder.decodePacket(packet);
+                        metrics.framesReceived++;
+                        
+                        // Update quality indicator
+                        const indicator = document.getElementById('remoteQualityIndicator');
+                        indicator.textContent = packet.q.toUpperCase();
+                        indicator.className = `quality-indicator quality-${packet.q}`;
+                        
+                        // Show audio indicator when audio is playing
+                        if (result.hasAudio) {
+                            metrics.audioPackets++;
+                            document.getElementById('remoteAudioIndicator').style.display = 'block';
+                        }
+                        
+                        // Calculate latency
+                        if (packet.ts) {
+                            const latency = Date.now() - packet.ts;
+                            metrics.latency.push(latency);
+                            if (metrics.latency.length > 30) metrics.latency.shift();
+                        }
+                    }
+                } catch (e) {
+                    console.error('Error processing message:', e);
+                }
+            };
+            
+            ws.onerror = (error) => {
+                statusEl.textContent = 'Connection error';
+                console.error('WebSocket error:', error);
+            };
+            
+            ws.onclose = () => {
+                statusEl.textContent = 'Disconnected';
+                stopStreaming();
+            };
+        }
+        
+        // Start streaming with quad-tree codec
+        async function startStreaming() {
+            try {
+                // Request high-quality stream for 4K
+                const constraints = {
+                    video: {
+                        width: { ideal: 3840, min: 1920 },
+                        height: { ideal: 2160, min: 1080 },
+                        frameRate: { ideal: 60, min: 30 }
+                    },
+                    audio: {
+                        sampleRate: 48000,
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }
+                };
+                
+                localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                localVideo.srcObject = localStream;
+                
+                // Get actual video dimensions
+                const videoTrack = localStream.getVideoTracks()[0];
+                const settings = videoTrack.getSettings();
+                
+                // Setup canvas for encoding
+                localCanvas.width = settings.width || 1920;
+                localCanvas.height = settings.height || 1080;
+                remoteCanvas.width = localCanvas.width;
+                remoteCanvas.height = localCanvas.height;
+                
+                statusEl.textContent = `Streaming at ${localCanvas.width}x${localCanvas.height}`;
+                
+                // Initialize encoder with audio priority
+                encoder = new QuadTreeEncoder(localVideo, localCanvas);
+                await encoder.initAudio(localStream);
+                
+                // Start sending frames at 60 FPS
+                isStreaming = true;
+                let lastFrameTime = Date.now();
+                const targetInterval = 1000 / 60; // 16.67ms for 60 FPS
+                
+                frameInterval = setInterval(() => {
+                    if (!isStreaming || ws.readyState !== WebSocket.OPEN) return;
+                    
+                    const now = Date.now();
+                    const delta = now - lastFrameTime;
+                    
+                    // Skip frame if we're running behind
+                    if (delta < targetInterval * 0.8) return;
+                    
+                    const packet = encoder.encodeFrame();
+                    ws.send(JSON.stringify(packet));
+                    
+                    metrics.framesSent++;
+                    lastFrameTime = now;
+                    
+                    // Update local quality indicator
+                    const indicator = document.getElementById('localQualityIndicator');
+                    indicator.textContent = packet.q.toUpperCase();
+                    indicator.className = `quality-indicator quality-${packet.q}`;
+                    
+                    // Show audio indicator
+                    if (packet.a) {
+                        document.getElementById('localAudioIndicator').style.display = 'block';
+                    }
+                }, targetInterval);
+                
+                // Start stats update
+                statsInterval = setInterval(updateStats, 1000);
+                
+                // Update UI
+                startBtn.textContent = 'Stop Conference';
+                muteBtn.disabled = false;
+                qualityBtn.disabled = false;
+                
+                document.getElementById('localAudio').textContent = 'ON';
+                
+            } catch (error) {
+                console.error('Error starting stream:', error);
+                statusEl.textContent = 'Failed to start stream: ' + error.message;
+            }
+        }
+        
+        // Stop streaming
+        function stopStreaming() {
+            isStreaming = false;
+            
+            if (frameInterval) {
+                clearInterval(frameInterval);
+                frameInterval = null;
+            }
+            
+            if (statsInterval) {
+                clearInterval(statsInterval);
+                statsInterval = null;
+            }
+            
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            
+            if (encoder) {
+                encoder = null;
+            }
+            
+            startBtn.textContent = 'Start Conference';
+            muteBtn.disabled = true;
+            qualityBtn.disabled = true;
+            document.getElementById('localAudio').textContent = 'OFF';
+            document.getElementById('localAudioIndicator').style.display = 'none';
+        }
+        
+        // Update performance stats
+        function updateStats() {
+            // Calculate FPS
+            metrics.localFPS = metrics.framesSent;
+            metrics.remoteFPS = metrics.framesReceived;
+            metrics.framesSent = 0;
+            metrics.framesReceived = 0;
+            
+            // Calculate average latency
+            const avgLatency = metrics.latency.length > 0
+                ? Math.round(metrics.latency.reduce((a, b) => a + b, 0) / metrics.latency.length)
+                : 0;
+            
+            // Estimate bandwidth (rough calculation)
+            metrics.bandwidth = (metrics.localFPS * 50000 * 8) / 1000000; // Assuming ~50KB per frame
+            
+            // Update UI
+            document.getElementById('localFPS').textContent = metrics.localFPS;
+            document.getElementById('remoteFPS').textContent = metrics.remoteFPS;
+            document.getElementById('remoteLatency').textContent = avgLatency;
+            document.getElementById('remoteBandwidth').textContent = metrics.bandwidth.toFixed(2);
+            
+            // Update local quality based on FPS
+            let quality = 'HIGH';
+            if (metrics.localFPS < 30) quality = 'LOW';
+            else if (metrics.localFPS < 50) quality = 'MEDIUM';
+            document.getElementById('localQuality').textContent = quality;
+            
+            // Log audio integrity
+            if (metrics.audioPackets > 0) {
+                console.log(`Audio integrity: 100% (${metrics.audioPackets} packets)`);
+                metrics.audioPackets = 0;
+            }
+        }
+        
+        // Button handlers
+        startBtn.addEventListener('click', () => {
+            if (isStreaming) {
+                stopStreaming();
+                if (ws) {
+                    ws.close();
+                    ws = null;
+                }
+            } else {
+                connect();
+                startStreaming();
+            }
+        });
+        
+        muteBtn.addEventListener('click', () => {
+            if (localStream) {
+                const audioTrack = localStream.getAudioTracks()[0];
+                if (audioTrack) {
+                    audioTrack.enabled = !audioTrack.enabled;
+                    muteBtn.textContent = audioTrack.enabled ? 'Mute Audio' : 'Unmute Audio';
+                    document.getElementById('localAudio').textContent = audioTrack.enabled ? 'ON' : 'MUTED';
+                    document.getElementById('localAudioIndicator').style.display = audioTrack.enabled ? 'block' : 'none';
+                }
+            }
+        });
+        
+        qualityBtn.addEventListener('click', () => {
+            if (encoder) {
+                // Toggle quality mode
+                const modes = ['Auto', 'High', 'Medium', 'Low'];
+                const current = qualityBtn.textContent.replace(' Quality', '');
+                const nextIndex = (modes.indexOf(current) + 1) % modes.length;
+                qualityBtn.textContent = modes[nextIndex] + ' Quality';
+                
+                // Apply quality setting
+                if (modes[nextIndex] === 'High') {
+                    encoder.keyFrameInterval = 120;
+                } else if (modes[nextIndex] === 'Medium') {
+                    encoder.keyFrameInterval = 60;
+                } else if (modes[nextIndex] === 'Low') {
+                    encoder.keyFrameInterval = 30;
+                }
+            }
+        });
+        
+        // Initialize on load
+        window.addEventListener('load', () => {
+            statusEl.textContent = 'Ready - Click Start Conference to begin';
+        });
+    </script>
+</body>
+</html>

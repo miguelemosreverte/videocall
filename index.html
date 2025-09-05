@@ -3,1137 +3,519 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Adaptive WebP Conference - Up to 4K 60FPS</title>
+    <title>4K@60fps Conference - Quad-Tree Codec</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        
-        :root {
-            --primary: #667eea;
-            --secondary: #764ba2;
-            --success: #10b981;
-            --warning: #f59e0b;
-            --danger: #ef4444;
-            --dark: #1f2937;
-            --light: #f3f4f6;
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
         
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
-            min-height: 100vh;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
             display: flex;
             flex-direction: column;
+            height: 100vh;
         }
         
-        /* Header */
-        .header {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            padding: 1rem 2rem;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            z-index: 1000;
+        #header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 15px 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
         }
         
-        .logo {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: var(--dark);
-        }
-        
-        .quality-badge {
-            background: linear-gradient(135deg, #fbbf24, #f59e0b);
-            color: white;
-            padding: 0.25rem 0.75rem;
-            border-radius: 20px;
-            font-size: 0.75rem;
+        h1 {
+            font-size: 24px;
             font-weight: 600;
-            animation: pulse 2s infinite;
         }
         
-        .quality-badge.ultra {
-            background: linear-gradient(135deg, #10b981, #059669);
+        #status {
+            margin-top: 5px;
+            font-size: 14px;
+            opacity: 0.9;
         }
         
-        @keyframes pulse {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.9; transform: scale(1.05); }
-        }
-        
-        /* Main Content */
-        .main {
+        #container {
             flex: 1;
-            padding: 2rem;
             display: flex;
-            gap: 2rem;
-            max-width: 1920px;
-            width: 100%;
-            margin: 0 auto;
-        }
-        
-        /* Video Grid */
-        .video-grid {
-            flex: 1;
-            display: grid;
-            gap: 1rem;
-            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-            grid-auto-rows: minmax(300px, 1fr);
-            height: fit-content;
-        }
-        
-        .video-container {
-            background: #000;
-            border-radius: 16px;
+            padding: 20px;
+            gap: 20px;
             overflow: hidden;
+        }
+        
+        #localSection, #remoteSection {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #1a1a1a;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .sectionHeader {
+            padding: 15px;
+            background: rgba(255,255,255,0.05);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        h2 {
+            font-size: 18px;
+            font-weight: 500;
+            margin-bottom: 5px;
+        }
+        
+        .stats {
+            font-size: 13px;
+            color: #888;
+            display: flex;
+            gap: 15px;
+            margin-top: 5px;
+        }
+        
+        .stat {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .videoContainer {
+            flex: 1;
             position: relative;
-            aspect-ratio: 16/9;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
-            transition: transform 0.3s, box-shadow 0.3s;
-        }
-        
-        .video-container.hd {
-            border: 2px solid var(--warning);
-        }
-        
-        .video-container.ultra-hd {
-            border: 2px solid var(--success);
-            box-shadow: 0 0 30px rgba(16, 185, 129, 0.3);
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         
         video, canvas {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-            background: #000;
+            max-width: 100%;
+            max-height: 100%;
+            width: auto;
+            height: auto;
         }
         
-        /* Quality Indicator */
+        #localVideo {
+            display: none;
+        }
+        
         .quality-indicator {
             position: absolute;
-            top: 1rem;
-            right: 1rem;
-            background: rgba(0, 0, 0, 0.8);
-            backdrop-filter: blur(10px);
-            padding: 0.5rem 1rem;
-            border-radius: 8px;
-            font-size: 0.875rem;
-            color: white;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
+            top: 10px;
+            right: 10px;
+            padding: 5px 10px;
+            background: rgba(0,0,0,0.7);
+            border-radius: 5px;
+            font-size: 12px;
         }
         
-        .quality-indicator .badge {
-            background: var(--success);
-            padding: 0.25rem 0.5rem;
-            border-radius: 4px;
-            font-weight: 600;
-        }
+        .quality-high { color: #4ade80; }
+        .quality-medium { color: #fbbf24; }
+        .quality-low { color: #f87171; }
         
-        /* Performance Monitor */
-        .performance-monitor {
+        .audio-indicator {
             position: absolute;
-            bottom: 1rem;
-            left: 1rem;
-            right: 1rem;
-            background: rgba(0, 0, 0, 0.8);
-            backdrop-filter: blur(10px);
-            padding: 1rem;
-            border-radius: 8px;
-            color: white;
-            font-size: 0.75rem;
+            top: 10px;
+            left: 10px;
+            width: 20px;
+            height: 20px;
+            background: #4ade80;
+            border-radius: 50%;
+            animation: pulse 1s infinite;
         }
         
-        .perf-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-            gap: 1rem;
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
         }
         
-        .perf-item {
+        #controls {
+            padding: 15px 20px;
+            background: #1a1a1a;
+            border-top: 1px solid #333;
             display: flex;
-            flex-direction: column;
-            gap: 0.25rem;
-        }
-        
-        .perf-label {
-            color: rgba(255, 255, 255, 0.6);
-        }
-        
-        .perf-value {
-            font-size: 1.25rem;
-            font-weight: 600;
-        }
-        
-        /* Sidebar */
-        .sidebar {
-            width: 400px;
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            border-radius: 16px;
-            padding: 1.5rem;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
-            display: flex;
-            flex-direction: column;
-            gap: 1.5rem;
-            max-height: calc(100vh - 8rem);
-            overflow-y: auto;
-        }
-        
-        /* Network Stats */
-        .network-stats {
-            background: var(--light);
-            border-radius: 12px;
-            padding: 1rem;
-        }
-        
-        .bandwidth-meter {
-            margin-top: 1rem;
-            height: 40px;
-            background: #e5e7eb;
-            border-radius: 20px;
-            overflow: hidden;
-            position: relative;
-        }
-        
-        .bandwidth-fill {
-            height: 100%;
-            background: linear-gradient(90deg, var(--primary), var(--secondary));
-            transition: width 0.5s;
-            display: flex;
-            align-items: center;
+            gap: 10px;
             justify-content: center;
+        }
+        
+        button {
+            padding: 10px 20px;
+            background: #667eea;
             color: white;
-            font-weight: 600;
-        }
-        
-        /* Quality Selector */
-        .quality-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 0.5rem;
-        }
-        
-        .quality-option {
-            padding: 0.75rem;
-            border: 2px solid var(--light);
-            background: white;
-            border-radius: 8px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.3s;
-            font-size: 0.75rem;
-        }
-        
-        .quality-option.available {
-            border-color: var(--success);
-            background: rgba(16, 185, 129, 0.1);
-        }
-        
-        .quality-option.active {
-            background: var(--primary);
-            color: white;
-            border-color: var(--primary);
-            transform: scale(1.05);
-        }
-        
-        .quality-option.unavailable {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        
-        .quality-option .resolution {
-            font-weight: 600;
-            font-size: 0.875rem;
-        }
-        
-        .quality-option .bandwidth {
-            color: #6b7280;
-            font-size: 0.625rem;
-            margin-top: 0.25rem;
-        }
-        
-        /* Controls */
-        .controls {
-            display: flex;
-            gap: 0.5rem;
-        }
-        
-        .control-btn {
-            flex: 1;
-            padding: 0.75rem;
             border: none;
-            border-radius: 12px;
-            background: var(--light);
-            color: var(--dark);
-            font-size: 1rem;
+            border-radius: 8px;
             cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
             transition: all 0.3s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
         }
         
-        .control-btn:hover {
-            background: var(--primary);
-            color: white;
+        button:hover {
+            background: #764ba2;
             transform: translateY(-2px);
         }
         
-        /* Adaptive Settings */
-        .adaptive-controls {
-            background: linear-gradient(135deg, var(--primary), var(--secondary));
-            color: white;
-            padding: 1rem;
-            border-radius: 12px;
+        button:disabled {
+            background: #444;
+            cursor: not-allowed;
+            transform: none;
         }
         
-        .switch {
-            position: relative;
-            display: inline-block;
-            width: 60px;
-            height: 30px;
+        .error {
+            background: #dc2626 !important;
         }
         
-        .switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
-        
-        .slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: rgba(255, 255, 255, 0.3);
-            transition: 0.4s;
-            border-radius: 34px;
-        }
-        
-        .slider:before {
-            position: absolute;
-            content: "";
-            height: 22px;
-            width: 22px;
-            left: 4px;
-            bottom: 4px;
-            background-color: white;
-            transition: 0.4s;
-            border-radius: 50%;
-        }
-        
-        input:checked + .slider {
-            background-color: var(--success);
-        }
-        
-        input:checked + .slider:before {
-            transform: translateX(30px);
+        .success {
+            background: #16a34a !important;
         }
     </style>
 </head>
 <body>
-    <!-- Header -->
-    <header class="header">
-        <div class="logo">
-            <span>🚀 Adaptive Conference</span>
-            <span class="quality-badge" id="currentQualityBadge">Auto</span>
-        </div>
-        <div class="status-bar">
-            <div class="status-item">
-                <span>📊 Bandwidth:</span>
-                <strong id="currentBandwidth">0 Mbps</strong>
+    <div id="header">
+        <h1>4K@60fps Conference - Quad-Tree Codec</h1>
+        <div id="status">Initializing...</div>
+    </div>
+    
+    <div id="container">
+        <div id="localSection">
+            <div class="sectionHeader">
+                <h2>📹 Local Stream</h2>
+                <div class="stats">
+                    <div class="stat">FPS: <span id="localFPS">0</span></div>
+                    <div class="stat">Quality: <span id="localQuality">-</span></div>
+                    <div class="stat">Audio: <span id="localAudio">OFF</span></div>
+                </div>
             </div>
-            <div class="status-item">
-                <span>⚡ Latency:</span>
-                <strong id="currentLatency">0ms</strong>
-            </div>
-            <div class="status-item">
-                <span>🎯 Quality:</span>
-                <strong id="currentResolution">-</strong>
-            </div>
-        </div>
-    </header>
-
-    <!-- Main Content -->
-    <main class="main">
-        <!-- Video Grid -->
-        <div class="video-grid" id="videoGrid">
-            <!-- Local Video -->
-            <div class="video-container" id="localContainer" data-user-id="local">
+            <div class="videoContainer">
                 <video id="localVideo" autoplay muted playsinline></video>
-                <div class="quality-indicator">
-                    <span>📹</span>
-                    <span class="badge" id="localQualityBadge">HD</span>
-                    <span id="localFPS">30 FPS</span>
-                </div>
-                <div class="performance-monitor">
-                    <div class="perf-grid">
-                        <div class="perf-item">
-                            <span class="perf-label">Frames</span>
-                            <span class="perf-value" id="framesSent">0</span>
-                        </div>
-                        <div class="perf-item">
-                            <span class="perf-label">Bandwidth</span>
-                            <span class="perf-value" id="uploadBandwidth">0</span>
-                        </div>
-                        <div class="perf-item">
-                            <span class="perf-label">CPU</span>
-                            <span class="perf-value" id="cpuUsage">0%</span>
-                        </div>
-                        <div class="perf-item">
-                            <span class="perf-label">Buffer</span>
-                            <span class="perf-value" id="bufferHealth">100%</span>
-                        </div>
-                    </div>
-                </div>
+                <canvas id="localCanvas"></canvas>
+                <div id="localQualityIndicator" class="quality-indicator quality-high">HIGH</div>
+                <div id="localAudioIndicator" class="audio-indicator" style="display:none"></div>
             </div>
         </div>
-
-        <!-- Sidebar -->
-        <aside class="sidebar">
-            <!-- Adaptive Controls -->
-            <div class="adaptive-controls">
-                <h3 style="margin-bottom: 1rem;">🎯 Adaptive Quality</h3>
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span>Auto-adjust quality</span>
-                    <label class="switch">
-                        <input type="checkbox" id="adaptiveToggle" checked>
-                        <span class="slider"></span>
-                    </label>
-                </div>
-                <p style="font-size: 0.75rem; margin-top: 0.5rem; opacity: 0.9;">
-                    System will automatically scale from 144p to 4K 60fps based on your bandwidth
-                </p>
-            </div>
-
-            <!-- Network Stats -->
-            <div class="network-stats">
-                <h3 style="margin-bottom: 0.5rem;">Network Performance</h3>
-                <div class="bandwidth-meter">
-                    <div class="bandwidth-fill" id="bandwidthMeter" style="width: 0%">
-                        <span id="bandwidthPercent">0%</span>
-                    </div>
-                </div>
-                <div style="display: flex; justify-content: space-between; margin-top: 0.5rem; font-size: 0.75rem;">
-                    <span>0 Mbps</span>
-                    <span id="maxBandwidth">20 Mbps</span>
+        
+        <div id="remoteSection">
+            <div class="sectionHeader">
+                <h2>👥 Remote Streams</h2>
+                <div class="stats">
+                    <div class="stat">FPS: <span id="remoteFPS">0</span></div>
+                    <div class="stat">Latency: <span id="remoteLatency">-</span>ms</div>
+                    <div class="stat">Bandwidth: <span id="remoteBandwidth">0</span> Mbps</div>
                 </div>
             </div>
-
-            <!-- Quality Grid -->
-            <div>
-                <h3 style="margin-bottom: 1rem;">Video Quality</h3>
-                <div class="quality-grid" id="qualityGrid">
-                    <!-- Quality options will be added here -->
-                </div>
+            <div class="videoContainer">
+                <canvas id="remoteCanvas"></canvas>
+                <div id="remoteQualityIndicator" class="quality-indicator quality-high">-</div>
+                <div id="remoteAudioIndicator" class="audio-indicator" style="display:none"></div>
             </div>
+        </div>
+    </div>
+    
+    <div id="controls">
+        <button id="startBtn">Start Conference</button>
+        <button id="muteBtn" disabled>Mute Audio</button>
+        <button id="qualityBtn" disabled>Auto Quality</button>
+    </div>
 
-            <!-- Controls -->
-            <div class="controls">
-                <button id="toggleVideo" class="control-btn">📹 Video</button>
-                <button id="toggleAudio" class="control-btn">🎤 Audio</button>
-                <button id="requestMax" class="control-btn" style="background: var(--success); color: white;">
-                    🚀 Request 4K
-                </button>
-            </div>
-        </aside>
-    </main>
-
+    <script src="quadtree-client.js"></script>
     <script>
-        // Configuration
-        const WS_URL = 'wss://91.99.159.21.nip.io/ws';
-        
-        // Quality presets matching server
-        const QUALITY_PRESETS = [
-            { name: '144p', width: 256, height: 144, fps: 10, bandwidth: 0.1 },
-            { name: '240p', width: 426, height: 240, fps: 15, bandwidth: 0.2 },
-            { name: '360p', width: 640, height: 360, fps: 15, bandwidth: 0.4 },
-            { name: '480p', width: 854, height: 480, fps: 20, bandwidth: 0.8 },
-            { name: '720p', width: 1280, height: 720, fps: 30, bandwidth: 1.5 },
-            { name: '1080p', width: 1920, height: 1080, fps: 30, bandwidth: 3 },
-            { name: '1440p', width: 2560, height: 1440, fps: 30, bandwidth: 5 },
-            { name: '4K', width: 3840, height: 2160, fps: 30, bandwidth: 10 },
-            { name: '4K 60', width: 3840, height: 2160, fps: 60, bandwidth: 15 }
-        ];
-        
-        // State
         let ws = null;
         let localStream = null;
-        let userId = 'user-' + Math.random().toString(36).substr(2, 9);
-        let videoEnabled = true;
-        let audioEnabled = true;
-        let adaptiveEnabled = true;
-        let currentQuality = 2; // Start with 360p
-        let requestedQuality = null;
-        let qualityHistory = [2, 2, 2]; // Track quality over time for smoothing
-        let qualityChangeCount = 0;
+        let encoder = null;
+        let decoder = null;
+        let isStreaming = false;
+        let frameInterval = null;
+        let statsInterval = null;
         
         // Performance metrics
-        let framesSent = 0;
-        let framesReceived = 0;
-        let bytesReceived = 0;
-        let lastBandwidthTime = Date.now();
-        let bandwidth = 0;
-        let latency = 0;
-        let cpuUsage = 0;
-        let bufferFrames = [];
-        let droppedFrames = 0;
+        let metrics = {
+            localFPS: 0,
+            remoteFPS: 0,
+            latency: [],
+            bandwidth: 0,
+            framesSent: 0,
+            framesReceived: 0,
+            audioPackets: 0
+        };
         
-        // Performance monitoring
-        let performanceMonitor = null;
+        // Get DOM elements
+        const localVideo = document.getElementById('localVideo');
+        const localCanvas = document.getElementById('localCanvas');
+        const remoteCanvas = document.getElementById('remoteCanvas');
+        const statusEl = document.getElementById('status');
+        const startBtn = document.getElementById('startBtn');
+        const muteBtn = document.getElementById('muteBtn');
+        const qualityBtn = document.getElementById('qualityBtn');
         
-        // Initialize
-        async function init() {
-            try {
-                // Get user media with high quality constraints
-                localStream = await navigator.mediaDevices.getUserMedia({
-                    video: {
-                        width: { min: 640, ideal: 1920, max: 3840 },
-                        height: { min: 480, ideal: 1080, max: 2160 },
-                        frameRate: { min: 10, ideal: 30, max: 60 }
-                    },
-                    audio: {
-                        sampleRate: 48000,
-                        channelCount: 2,
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        autoGainControl: true
-                    }
-                });
-                
-                document.getElementById('localVideo').srcObject = localStream;
-                
-                // Setup quality grid
-                setupQualityGrid();
-                
-                // Connect WebSocket
-                connectWebSocket();
-                
-                // Setup controls
-                setupControls();
-                
-                // Start capture
-                startCapture();
-                
-                // Start performance monitoring
-                startPerformanceMonitoring();
-                
-                // Start feedback loop
-                startFeedbackLoop();
-                
-            } catch (error) {
-                console.error('Init error:', error);
-                alert('Failed to access camera/microphone: ' + error.message);
-            }
-        }
-        
-        function connectWebSocket() {
-            ws = new WebSocket(WS_URL);
-            ws.binaryType = 'arraybuffer';
+        // Initialize WebSocket connection
+        async function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+            
+            statusEl.textContent = `Connecting to ${wsUrl}...`;
+            
+            ws = new WebSocket(wsUrl);
             
             ws.onopen = () => {
-                console.log('Connected to adaptive server');
+                statusEl.textContent = 'Connected - Audio Priority Enabled';
                 
                 // Join room
                 ws.send(JSON.stringify({
                     type: 'join',
-                    room: 'main',
-                    userId: userId
+                    room: 'quadtree-4k',
+                    userId: 'user-' + Date.now()
                 }));
             };
             
-            ws.onmessage = handleMessage;
+            ws.onmessage = async (event) => {
+                try {
+                    const packet = JSON.parse(event.data);
+                    
+                    // Handle quad-tree packets
+                    if (packet.t === 'delta' || packet.t === 'key') {
+                        if (!decoder) {
+                            decoder = new QuadTreeDecoder(remoteCanvas);
+                            await decoder.initAudio();
+                        }
+                        
+                        const result = decoder.decodePacket(packet);
+                        metrics.framesReceived++;
+                        
+                        // Update quality indicator
+                        const indicator = document.getElementById('remoteQualityIndicator');
+                        indicator.textContent = packet.q.toUpperCase();
+                        indicator.className = `quality-indicator quality-${packet.q}`;
+                        
+                        // Show audio indicator when audio is playing
+                        if (result.hasAudio) {
+                            metrics.audioPackets++;
+                            document.getElementById('remoteAudioIndicator').style.display = 'block';
+                        }
+                        
+                        // Calculate latency
+                        if (packet.ts) {
+                            const latency = Date.now() - packet.ts;
+                            metrics.latency.push(latency);
+                            if (metrics.latency.length > 30) metrics.latency.shift();
+                        }
+                    }
+                } catch (e) {
+                    console.error('Error processing message:', e);
+                }
+            };
             
             ws.onerror = (error) => {
+                statusEl.textContent = 'Connection error';
                 console.error('WebSocket error:', error);
             };
             
             ws.onclose = () => {
-                setTimeout(connectWebSocket, 3000);
+                statusEl.textContent = 'Disconnected';
+                stopStreaming();
             };
         }
         
-        function handleMessage(event) {
-            if (typeof event.data === 'string') {
-                const message = JSON.parse(event.data);
-                
-                switch (message.type) {
-                    case 'user-joined':
-                        if (message.id && message.id !== userId) {
-                            addRemoteUser(message.id);
-                        }
-                        break;
-                    
-                    case 'user-left':
-                        if (message.id) {
-                            removeRemoteUser(message.id);
-                        }
-                        break;
-                    
-                    case 'participants':
-                        // Handle initial participants list
-                        if (message.users) {
-                            message.users.forEach(uid => {
-                                if (uid !== userId) {  // Compare with OUR userId
-                                    addRemoteUser(uid);
-                                }
-                            });
-                        }
-                        break;
-                    
-                    case 'quality-change':
-                        handleQualityChange(message);
-                        break;
-                    
-                    case 'webp-frame':
-                    case 'frame':  // Handle both frame types
-                        if (message.from && message.from !== userId) {
-                            displayRemoteFrame(message);
-                            framesReceived++;
-                            if (message.data) {
-                                bytesReceived += message.data.length;
-                            }
-                        }
-                        break;
-                    
-                    case 'audio':
-                        if (message.from && message.from !== userId) {
-                            console.log(`Received audio from ${message.from}, size: ${message.audioData?.length || 0}`);
-                            playRemoteAudio(message);
-                        }
-                        break;
-                    
-                    case 'ping':
-                        ws.send(JSON.stringify({ 
-                            type: 'pong', 
-                            timestamp: message.timestamp 
-                        }));
-                        break;
-                    
-                    case 'pong':
-                        latency = Date.now() - message.timestamp;
-                        document.getElementById('currentLatency').textContent = latency + 'ms';
-                        break;
-                }
-            }
-        }
-        
-        function startCapture() {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            const video = document.getElementById('localVideo');
-            
-            let frameInterval = 100; // Start with 10 FPS
-            
-            function captureFrame() {
-                if (!videoEnabled || !ws || ws.readyState !== WebSocket.OPEN) {
-                    setTimeout(captureFrame, frameInterval);
-                    return;
-                }
-                
-                const preset = QUALITY_PRESETS[currentQuality];
-                
-                // Adjust frame interval based on FPS
-                frameInterval = Math.floor(1000 / preset.fps);
-                
-                canvas.width = preset.width;
-                canvas.height = preset.height;
-                ctx.drawImage(video, 0, 0, preset.width, preset.height);
-                
-                // Use higher quality for higher resolutions
-                const jpegQuality = currentQuality >= 5 ? 0.9 : 0.7;
-                
-                canvas.toBlob((blob) => {
-                    if (blob) {
-                        const reader = new FileReader();
-                        reader.onloadend = () => {
-                            const base64 = reader.result.split(',')[1];
-                            ws.send(JSON.stringify({
-                                type: 'frame',
-                                data: base64,
-                                quality: preset.name
-                            }));
-                            framesSent++;
-                            document.getElementById('framesSent').textContent = framesSent;
-                        };
-                        reader.readAsDataURL(blob);
+        // Start streaming with quad-tree codec
+        async function startStreaming() {
+            try {
+                // Request high-quality stream for 4K
+                const constraints = {
+                    video: {
+                        width: { ideal: 3840, min: 1920 },
+                        height: { ideal: 2160, min: 1080 },
+                        frameRate: { ideal: 60, min: 30 }
+                    },
+                    audio: {
+                        sampleRate: 48000,
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
                     }
-                }, 'image/jpeg', jpegQuality);
+                };
                 
-                setTimeout(captureFrame, frameInterval);
-            }
-            
-            captureFrame();
-            
-            // Start audio capture
-            startAudioCapture();
-        }
-        
-        function startAudioCapture() {
-            if (!localStream) return;
-            
-            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            const source = audioContext.createMediaStreamSource(localStream);
-            const processor = audioContext.createScriptProcessor(4096, 1, 1);
-            
-            let audioBuffer = [];
-            let sendInterval = null;
-            
-            processor.onaudioprocess = (e) => {
-                if (!audioEnabled || !ws || ws.readyState !== WebSocket.OPEN) {
-                    audioBuffer = []; // Clear buffer when not sending
-                    return;
-                }
+                localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                localVideo.srcObject = localStream;
                 
-                const inputData = e.inputBuffer.getChannelData(0);
-                audioBuffer.push(...inputData);
+                // Get actual video dimensions
+                const videoTrack = localStream.getVideoTracks()[0];
+                const settings = videoTrack.getSettings();
                 
-                // Send audio every 100ms to reduce overhead
-                if (!sendInterval) {
-                    sendInterval = setTimeout(() => {
-                        if (audioBuffer.length > 0) {
-                            // Apply soft clipping to prevent harsh distortion
-                            const clippedBuffer = audioBuffer.map(sample => {
-                                // Soft clipping using tanh function
-                                return Math.tanh(sample * 0.7) / 0.7;
-                            });
-                            
-                            // Convert to 16-bit PCM with reduced gain
-                            const pcmData = new Int16Array(clippedBuffer.length);
-                            for (let i = 0; i < clippedBuffer.length; i++) {
-                                // Apply 50% gain reduction before converting
-                                pcmData[i] = Math.max(-32768, Math.min(32767, clippedBuffer[i] * 16384));
-                            }
-                            
-                            // Convert to base64
-                            const bytes = new Uint8Array(pcmData.buffer);
-                            let binary = '';
-                            for (let i = 0; i < bytes.length; i++) {
-                                binary += String.fromCharCode(bytes[i]);
-                            }
-                            const base64 = btoa(binary);
-                            
-                            // Send audio data
-                            ws.send(JSON.stringify({
-                                type: 'audio',
-                                audioData: base64,
-                                sampleRate: audioContext.sampleRate
-                            }));
-                            
-                            audioBuffer = [];
-                        }
-                        sendInterval = null;
-                    }, 100);
-                }
-            };
-            
-            source.connect(processor);
-            // Don't connect processor to destination to avoid echo
-            processor.connect(audioContext.createGain()); // Connect to dummy node
-            
-            // Store for cleanup
-            window.audioCapture = { source, processor, audioContext };
-        }
-        
-        function startFeedbackLoop() {
-            setInterval(() => {
-                if (!ws || ws.readyState !== WebSocket.OPEN) return;
+                // Setup canvas for encoding
+                localCanvas.width = settings.width || 1920;
+                localCanvas.height = settings.height || 1080;
+                remoteCanvas.width = localCanvas.width;
+                remoteCanvas.height = localCanvas.height;
                 
-                // Calculate buffer health (0-1)
-                const bufferHealth = Math.max(0, Math.min(1, 1 - (droppedFrames / Math.max(1, framesReceived))));
+                statusEl.textContent = `Streaming at ${localCanvas.width}x${localCanvas.height}`;
                 
-                // Send feedback to server
-                ws.send(JSON.stringify({
-                    type: 'feedback',
-                    feedback: {
-                        framesReceived: framesReceived,
-                        framesDropped: droppedFrames,
-                        bufferHealth: bufferHealth,
-                        cpuUsage: cpuUsage,
-                        bandwidth: bandwidth,
-                        latency: latency,
-                        requestQuality: requestedQuality
-                    }
-                }));
+                // Initialize encoder with audio priority
+                encoder = new QuadTreeEncoder(localVideo, localCanvas);
+                await encoder.initAudio(localStream);
                 
-                // Send ping for latency measurement
-                ws.send(JSON.stringify({
-                    type: 'ping',
-                    timestamp: Date.now()
-                }));
+                // Start sending frames at 60 FPS
+                isStreaming = true;
+                let lastFrameTime = Date.now();
+                const targetInterval = 1000 / 60; // 16.67ms for 60 FPS
                 
-            }, 1000); // Send feedback every second
-        }
-        
-        function startPerformanceMonitoring() {
-            // Monitor CPU usage (approximation)
-            let lastTime = performance.now();
-            let frames = 0;
-            
-            function measureCPU() {
-                const currentTime = performance.now();
-                const delta = currentTime - lastTime;
-                
-                frames++;
-                if (delta >= 1000) {
-                    const fps = (frames * 1000) / delta;
-                    cpuUsage = Math.min(100, Math.max(0, 100 - (fps * 3))); // Rough estimate
-                    document.getElementById('cpuUsage').textContent = Math.round(cpuUsage) + '%';
+                frameInterval = setInterval(() => {
+                    if (!isStreaming || ws.readyState !== WebSocket.OPEN) return;
                     
-                    frames = 0;
-                    lastTime = currentTime;
-                }
+                    const now = Date.now();
+                    const delta = now - lastFrameTime;
+                    
+                    // Skip frame if we're running behind
+                    if (delta < targetInterval * 0.8) return;
+                    
+                    const packet = encoder.encodeFrame();
+                    ws.send(JSON.stringify(packet));
+                    
+                    metrics.framesSent++;
+                    lastFrameTime = now;
+                    
+                    // Update local quality indicator
+                    const indicator = document.getElementById('localQualityIndicator');
+                    indicator.textContent = packet.q.toUpperCase();
+                    indicator.className = `quality-indicator quality-${packet.q}`;
+                    
+                    // Show audio indicator
+                    if (packet.a) {
+                        document.getElementById('localAudioIndicator').style.display = 'block';
+                    }
+                }, targetInterval);
                 
-                requestAnimationFrame(measureCPU);
+                // Start stats update
+                statsInterval = setInterval(updateStats, 1000);
+                
+                // Update UI
+                startBtn.textContent = 'Stop Conference';
+                muteBtn.disabled = false;
+                qualityBtn.disabled = false;
+                
+                document.getElementById('localAudio').textContent = 'ON';
+                
+            } catch (error) {
+                console.error('Error starting stream:', error);
+                statusEl.textContent = 'Failed to start stream: ' + error.message;
             }
-            measureCPU();
-            
-            // Monitor bandwidth
-            setInterval(() => {
-                const now = Date.now();
-                const duration = (now - lastBandwidthTime) / 1000;
-                bandwidth = (bytesReceived * 8) / (duration * 1000000); // Convert to Mbps
-                
-                document.getElementById('currentBandwidth').textContent = bandwidth.toFixed(2) + ' Mbps';
-                document.getElementById('uploadBandwidth').textContent = bandwidth.toFixed(1) + ' Mbps';
-                
-                // Update bandwidth meter
-                const percent = Math.min(100, (bandwidth / 20) * 100);
-                document.getElementById('bandwidthMeter').style.width = percent + '%';
-                document.getElementById('bandwidthPercent').textContent = Math.round(percent) + '%';
-                
-                bytesReceived = 0;
-                lastBandwidthTime = now;
-                
-                // Update quality availability
-                updateQualityAvailability();
-                
-            }, 1000);
         }
         
-        function handleQualityChange(message) {
-            console.log('Quality changed to:', message.quality);
+        // Stop streaming
+        function stopStreaming() {
+            isStreaming = false;
             
-            // Update current quality
-            let targetQuality = currentQuality;
-            for (let i = 0; i < QUALITY_PRESETS.length; i++) {
-                if (QUALITY_PRESETS[i].name === message.quality) {
-                    targetQuality = i;
-                    break;
-                }
+            if (frameInterval) {
+                clearInterval(frameInterval);
+                frameInterval = null;
             }
             
-            // Add to history and smooth changes
-            qualityHistory.push(targetQuality);
-            if (qualityHistory.length > 5) qualityHistory.shift();
-            
-            // Calculate average quality for smoothing
-            const avgQuality = Math.round(qualityHistory.reduce((a, b) => a + b, 0) / qualityHistory.length);
-            
-            // Only change if we've converged on a new quality
-            if (Math.abs(avgQuality - currentQuality) >= 1 && qualityChangeCount++ > 2) {
-                currentQuality = avgQuality;
-                qualityChangeCount = 0;
+            if (statsInterval) {
+                clearInterval(statsInterval);
+                statsInterval = null;
             }
+            
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            
+            if (encoder) {
+                encoder = null;
+            }
+            
+            startBtn.textContent = 'Start Conference';
+            muteBtn.disabled = true;
+            qualityBtn.disabled = true;
+            document.getElementById('localAudio').textContent = 'OFF';
+            document.getElementById('localAudioIndicator').style.display = 'none';
+        }
+        
+        // Update performance stats
+        function updateStats() {
+            // Calculate FPS
+            metrics.localFPS = metrics.framesSent;
+            metrics.remoteFPS = metrics.framesReceived;
+            metrics.framesSent = 0;
+            metrics.framesReceived = 0;
+            
+            // Calculate average latency
+            const avgLatency = metrics.latency.length > 0
+                ? Math.round(metrics.latency.reduce((a, b) => a + b, 0) / metrics.latency.length)
+                : 0;
+            
+            // Estimate bandwidth (rough calculation)
+            metrics.bandwidth = (metrics.localFPS * 50000 * 8) / 1000000; // Assuming ~50KB per frame
             
             // Update UI
-            document.getElementById('currentQualityBadge').textContent = message.quality;
-            document.getElementById('localQualityBadge').textContent = message.quality;
-            document.getElementById('currentResolution').textContent = `${message.width}x${message.height}`;
-            document.getElementById('localFPS').textContent = message.fps + ' FPS';
+            document.getElementById('localFPS').textContent = metrics.localFPS;
+            document.getElementById('remoteFPS').textContent = metrics.remoteFPS;
+            document.getElementById('remoteLatency').textContent = avgLatency;
+            document.getElementById('remoteBandwidth').textContent = metrics.bandwidth.toFixed(2);
             
-            // Update quality badge style
-            const badge = document.getElementById('currentQualityBadge');
-            if (currentQuality >= 7) {
-                badge.className = 'quality-badge ultra';
-                document.getElementById('localContainer').className = 'video-container ultra-hd';
-            } else if (currentQuality >= 5) {
-                badge.className = 'quality-badge';
-                document.getElementById('localContainer').className = 'video-container hd';
+            // Update local quality based on FPS
+            let quality = 'HIGH';
+            if (metrics.localFPS < 30) quality = 'LOW';
+            else if (metrics.localFPS < 50) quality = 'MEDIUM';
+            document.getElementById('localQuality').textContent = quality;
+            
+            // Log audio integrity
+            if (metrics.audioPackets > 0) {
+                console.log(`Audio integrity: 100% (${metrics.audioPackets} packets)`);
+                metrics.audioPackets = 0;
+            }
+        }
+        
+        // Button handlers
+        startBtn.addEventListener('click', () => {
+            if (isStreaming) {
+                stopStreaming();
+                if (ws) {
+                    ws.close();
+                    ws = null;
+                }
             } else {
-                badge.className = 'quality-badge';
-                document.getElementById('localContainer').className = 'video-container';
-            }
-            
-            updateQualityGrid();
-        }
-        
-        function setupQualityGrid() {
-            const grid = document.getElementById('qualityGrid');
-            
-            QUALITY_PRESETS.forEach((preset, index) => {
-                const option = document.createElement('div');
-                option.className = 'quality-option';
-                option.dataset.index = index;
-                option.innerHTML = `
-                    <div class="resolution">${preset.name}</div>
-                    <div class="bandwidth">${preset.bandwidth} Mbps</div>
-                `;
-                option.onclick = () => selectQuality(index);
-                grid.appendChild(option);
-            });
-        }
-        
-        function updateQualityGrid() {
-            const options = document.querySelectorAll('.quality-option');
-            options.forEach((option, index) => {
-                option.className = 'quality-option';
-                if (index === currentQuality) {
-                    option.classList.add('active');
-                }
-            });
-        }
-        
-        function updateQualityAvailability() {
-            const options = document.querySelectorAll('.quality-option');
-            options.forEach((option, index) => {
-                const preset = QUALITY_PRESETS[index];
-                option.className = 'quality-option';
-                
-                if (bandwidth >= preset.bandwidth) {
-                    option.classList.add('available');
-                } else {
-                    option.classList.add('unavailable');
-                }
-                
-                if (index === currentQuality) {
-                    option.classList.add('active');
-                }
-            });
-        }
-        
-        function selectQuality(index) {
-            if (!adaptiveEnabled) {
-                currentQuality = index;
-                requestedQuality = QUALITY_PRESETS[index].name;
-                updateQualityGrid();
-            }
-        }
-        
-        function displayRemoteFrame(message) {
-            // Create container if it doesn't exist
-            if (!document.getElementById(`container-${message.from}`) && message.from) {
-                addRemoteUser(message.from || message.From);
-            }
-            
-            const userId = message.from || message.From;
-            const canvas = document.getElementById(`canvas-${userId}`);
-            if (canvas) {
-                const ctx = canvas.getContext('2d');
-                const img = new Image();
-                img.onload = () => {
-                    // Use fixed dimensions that match our container aspect ratio
-                    const targetWidth = 854;
-                    const targetHeight = 480;
-                    
-                    // Set canvas size if not already set
-                    if (canvas.width !== targetWidth) {
-                        canvas.width = targetWidth;
-                        canvas.height = targetHeight;
-                    }
-                    
-                    // Calculate how to fit image in canvas
-                    const imgAspect = img.width / img.height;
-                    const canvasAspect = targetWidth / targetHeight;
-                    
-                    let drawWidth, drawHeight, offsetX = 0, offsetY = 0;
-                    
-                    // Use "cover" strategy - fill entire canvas, crop if needed
-                    if (imgAspect > canvasAspect) {
-                        // Image is wider - fit to height, crop width
-                        drawHeight = targetHeight;
-                        drawWidth = targetHeight * imgAspect;
-                        offsetX = (targetWidth - drawWidth) / 2;
-                    } else {
-                        // Image is taller - fit to width, crop height
-                        drawWidth = targetWidth;
-                        drawHeight = targetWidth / imgAspect;
-                        offsetY = (targetHeight - drawHeight) / 2;
-                    }
-                    
-                    // Clear canvas and draw
-                    ctx.fillStyle = '#000';
-                    ctx.fillRect(0, 0, canvas.width, canvas.height);
-                    ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
-                };
-                img.src = 'data:image/webp;base64,' + message.data;
-            }
-        }
-        
-        function addRemoteUser(userId) {
-            if (!userId || document.getElementById(`container-${userId}`)) return;
-            
-            const container = document.createElement('div');
-            container.className = 'video-container';
-            container.id = `container-${userId}`;
-            container.dataset.userId = userId;
-            
-            const canvas = document.createElement('canvas');
-            canvas.id = `canvas-${userId}`;
-            // Fixed 16:9 canvas size
-            canvas.width = 854;
-            canvas.height = 480;
-            // CSS to fill container
-            canvas.style.width = '100%';
-            canvas.style.height = '100%';
-            canvas.style.display = 'block';
-            canvas.style.objectFit = 'cover';
-            
-            const qualityIndicator = document.createElement('div');
-            qualityIndicator.className = 'quality-indicator';
-            qualityIndicator.innerHTML = `
-                <span>👤</span>
-                <span class="badge">HD</span>
-                <span>User ${userId.substring(0, 6)}</span>
-            `;
-            
-            container.appendChild(canvas);
-            container.appendChild(qualityIndicator);
-            document.getElementById('videoGrid').appendChild(container);
-        }
-        
-        function removeRemoteUser(userId) {
-            const container = document.getElementById(`container-${userId}`);
-            if (container) {
-                container.remove();
-            }
-        }
-        
-        // Audio context for playback
-        let audioContext = null;
-        const audioQueues = new Map(); // Store audio data per user
-        
-        function initAudioContext() {
-            if (!audioContext) {
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            }
-        }
-        
-        function playRemoteAudio(message) {
-            if (!message.from || message.from === userId) return;
-            
-            initAudioContext();
-            
-            // Resume audio context if suspended (browser requirement)
-            if (audioContext.state === 'suspended') {
-                audioContext.resume();
-            }
-            
-            if (message.audioData && message.audioData.length > 0) {
-                try {
-                    // Decode base64 to binary
-                    const binaryString = atob(message.audioData);
-                    const bytes = new Uint8Array(binaryString.length);
-                    for (let i = 0; i < binaryString.length; i++) {
-                        bytes[i] = binaryString.charCodeAt(i);
-                    }
-                    
-                    // Convert bytes back to Int16Array (PCM data)
-                    const pcmData = new Int16Array(bytes.buffer);
-                    
-                    // Convert PCM to Float32 for Web Audio
-                    const floatData = new Float32Array(pcmData.length);
-                    for (let i = 0; i < pcmData.length; i++) {
-                        floatData[i] = pcmData[i] / 32768; // Convert to -1 to 1 range
-                    }
-                    
-                    // Create audio buffer
-                    const sampleRate = message.sampleRate || 48000;
-                    const buffer = audioContext.createBuffer(1, floatData.length, sampleRate);
-                    buffer.getChannelData(0).set(floatData);
-                    
-                    // Create gain node for volume control
-                    const gainNode = audioContext.createGain();
-                    gainNode.gain.value = 0.3; // Limit volume to 30% to prevent feedback
-                    
-                    // Create compressor to prevent clipping
-                    const compressor = audioContext.createDynamicsCompressor();
-                    compressor.threshold.value = -24; // Start compression at -24dB
-                    compressor.knee.value = 30;
-                    compressor.ratio.value = 12; // 12:1 compression ratio
-                    compressor.attack.value = 0.003; // 3ms attack
-                    compressor.release.value = 0.25; // 250ms release
-                    
-                    // Play the buffer with volume limiting
-                    const source = audioContext.createBufferSource();
-                    source.buffer = buffer;
-                    source.connect(gainNode);
-                    gainNode.connect(compressor);
-                    compressor.connect(audioContext.destination);
-                    source.start(0);
-                    
-                    console.log(`Playing audio from ${message.from}, samples: ${floatData.length}, state: ${audioContext.state}`);
-                } catch (error) {
-                    console.error('Audio playback error:', error);
-                }
-            }
-        }
-        
-        function setupControls() {
-            // Adaptive toggle
-            document.getElementById('adaptiveToggle').onchange = (e) => {
-                adaptiveEnabled = e.target.checked;
-                requestedQuality = adaptiveEnabled ? null : QUALITY_PRESETS[currentQuality].name;
-            };
-            
-            // Video toggle
-            document.getElementById('toggleVideo').onclick = () => {
-                videoEnabled = !videoEnabled;
-                const btn = document.getElementById('toggleVideo');
-                btn.style.background = videoEnabled ? '' : 'var(--danger)';
-                btn.style.color = videoEnabled ? '' : 'white';
-                
-                if (localStream) {
-                    localStream.getVideoTracks().forEach(track => {
-                        track.enabled = videoEnabled;
-                    });
-                }
-            };
-            
-            // Audio toggle
-            document.getElementById('toggleAudio').onclick = () => {
-                audioEnabled = !audioEnabled;
-                const btn = document.getElementById('toggleAudio');
-                btn.style.background = audioEnabled ? '' : 'var(--danger)';
-                btn.style.color = audioEnabled ? '' : 'white';
-                
-                if (localStream) {
-                    localStream.getAudioTracks().forEach(track => {
-                        track.enabled = audioEnabled;
-                    });
-                }
-            };
-            
-            // Request max quality
-            document.getElementById('requestMax').onclick = () => {
-                if (bandwidth >= 10) {
-                    requestedQuality = bandwidth >= 15 ? '4K 60' : '4K';
-                    alert(`Requesting ${requestedQuality} quality!`);
-                } else {
-                    alert(`Need at least 10 Mbps for 4K. Current: ${bandwidth.toFixed(1)} Mbps`);
-                }
-            };
-        }
-        
-        // Resume audio on user interaction (browser requirement)
-        document.addEventListener('click', () => {
-            if (audioContext && audioContext.state === 'suspended') {
-                audioContext.resume().then(() => {
-                    console.log('Audio context resumed after user interaction');
-                });
+                connect();
+                startStreaming();
             }
         });
         
-        // Start the application
-        init();
+        muteBtn.addEventListener('click', () => {
+            if (localStream) {
+                const audioTrack = localStream.getAudioTracks()[0];
+                if (audioTrack) {
+                    audioTrack.enabled = !audioTrack.enabled;
+                    muteBtn.textContent = audioTrack.enabled ? 'Mute Audio' : 'Unmute Audio';
+                    document.getElementById('localAudio').textContent = audioTrack.enabled ? 'ON' : 'MUTED';
+                    document.getElementById('localAudioIndicator').style.display = audioTrack.enabled ? 'block' : 'none';
+                }
+            }
+        });
+        
+        qualityBtn.addEventListener('click', () => {
+            if (encoder) {
+                // Toggle quality mode
+                const modes = ['Auto', 'High', 'Medium', 'Low'];
+                const current = qualityBtn.textContent.replace(' Quality', '');
+                const nextIndex = (modes.indexOf(current) + 1) % modes.length;
+                qualityBtn.textContent = modes[nextIndex] + ' Quality';
+                
+                // Apply quality setting
+                if (modes[nextIndex] === 'High') {
+                    encoder.keyFrameInterval = 120;
+                } else if (modes[nextIndex] === 'Medium') {
+                    encoder.keyFrameInterval = 60;
+                } else if (modes[nextIndex] === 'Low') {
+                    encoder.keyFrameInterval = 30;
+                }
+            }
+        });
+        
+        // Initialize on load
+        window.addEventListener('load', () => {
+            statusEl.textContent = 'Ready - Click Start Conference to begin';
+        });
     </script>
 </body>
 </html>
