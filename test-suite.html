@@ -228,8 +228,17 @@
                     switch(message.type) {
                         case 'frame':
                         case 'webp-frame':
+                            // Log what we actually receive for debugging
+                            console.log('Frame received by B from:', message.from);
+                            
                             // Handle frames from any source
-                            if (message.from === 'testA') {
+                            if (!message.from) {
+                                // No from field - might be our test frame
+                                metrics.B.framesReceived++;
+                                updateMetrics();
+                                displayFrame('canvasB', message.data, 'Unknown');
+                                log(`Frame without 'from' field received`, 'info');
+                            } else if (message.from === 'testA') {
                                 metrics.B.framesReceived++;
                                 updateMetrics();
                                 displayFrame('canvasB', message.data, 'Test A');
@@ -242,12 +251,30 @@
                             } else if (message.from === 'testB') {
                                 // This is our own frame being echoed back - don't count
                                 log(`Warning: Received own frame back`, 'warning');
-                            } else if (message.from) {
-                                // Frame from another user (like main conference tab)
-                                // Don't count these in test metrics, just display with label
-                                const shortId = message.from.toString().substring(0, 8);
-                                displayFrame('canvasB', message.data, `User ${shortId}`);
-                                // Silently handle conference frames
+                            } else {
+                                // Check if it's our test frame by quality marker or timing
+                                const fromStr = message.from.toString();
+                                
+                                // Our test frames have quality: 'test' and timestamp field
+                                if (message.quality === 'test' || (message.timestamp && message.quality === 'test')) {
+                                    // This is definitely our test frame
+                                    metrics.B.framesReceived++;
+                                    updateMetrics();
+                                    displayFrame('canvasB', message.data, `Test Client`);
+                                    
+                                    if (message.timestamp) {
+                                        const frameLatency = Date.now() - message.timestamp;
+                                        // Only log first few to avoid spam
+                                        if (metrics.B.framesReceived <= 5) {
+                                            log(`Test frame received, latency: ${frameLatency}ms`, 'info');
+                                        }
+                                    }
+                                } else {
+                                    // Frame from another user (like main conference tab)
+                                    // Don't count these in test metrics, just display with label
+                                    const shortId = fromStr.substring(0, 8);
+                                    displayFrame('canvasB', message.data, `User ${shortId}`);
+                                }
                             }
                             break;
                         
