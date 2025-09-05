@@ -606,6 +606,7 @@
                     
                     case 'audio':
                         if (message.from && message.from !== userId) {
+                            console.log(`Received audio from ${message.from}, size: ${message.audioData?.length || 0}`);
                             playRemoteAudio(message);
                         }
                         break;
@@ -929,30 +930,25 @@
                 const ctx = canvas.getContext('2d');
                 const img = new Image();
                 img.onload = () => {
-                    // Clear canvas first
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    // Resize canvas to match image aspect ratio if needed
+                    const imgAspect = img.width / img.height;
+                    const containerAspect = 16 / 9; // Target aspect ratio
                     
-                    // Calculate proper aspect ratio to avoid stretching
-                    const aspectRatio = img.width / img.height;
-                    let drawWidth = canvas.width;
-                    let drawHeight = canvas.height;
-                    
-                    if (aspectRatio > canvas.width / canvas.height) {
-                        // Image is wider - fit to width
-                        drawHeight = canvas.width / aspectRatio;
-                    } else {
-                        // Image is taller - fit to height
-                        drawWidth = canvas.height * aspectRatio;
+                    // Adjust canvas size to match image aspect
+                    if (Math.abs(imgAspect - containerAspect) > 0.1) {
+                        if (imgAspect > containerAspect) {
+                            // Wider image
+                            canvas.width = 854;
+                            canvas.height = Math.round(854 / imgAspect);
+                        } else {
+                            // Taller image
+                            canvas.height = 480;
+                            canvas.width = Math.round(480 * imgAspect);
+                        }
                     }
                     
-                    // Center the image
-                    const x = (canvas.width - drawWidth) / 2;
-                    const y = (canvas.height - drawHeight) / 2;
-                    
-                    // Fill background with black for letterboxing/pillarboxing
-                    ctx.fillStyle = '#000';
-                    ctx.fillRect(0, 0, canvas.width, canvas.height);
-                    ctx.drawImage(img, x, y, drawWidth, drawHeight);
+                    // Draw image to fill entire canvas
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
                 };
                 img.src = 'data:image/webp;base64,' + message.data;
             }
@@ -968,12 +964,12 @@
             
             const canvas = document.createElement('canvas');
             canvas.id = `canvas-${userId}`;
-            // Use flexible sizing that can handle any aspect ratio
-            canvas.width = 640;
-            canvas.height = 640; // Square canvas to handle both orientations
+            // Use 16:9 aspect ratio by default, will adjust dynamically
+            canvas.width = 854;
+            canvas.height = 480;
             canvas.style.width = '100%';
             canvas.style.height = '100%';
-            canvas.style.objectFit = 'contain';
+            canvas.style.display = 'block';
             
             const qualityIndicator = document.createElement('div');
             qualityIndicator.className = 'quality-indicator';

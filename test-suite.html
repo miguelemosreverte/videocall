@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conference Test Suite</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #0f0;
+        }
+        .test-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .client-box {
+            border: 2px solid #0f0;
+            padding: 15px;
+            background: #000;
+        }
+        .status {
+            padding: 5px;
+            margin: 5px 0;
+        }
+        .success { color: #0f0; }
+        .error { color: #f00; }
+        .warning { color: #ff0; }
+        .info { color: #0ff; }
+        button {
+            background: #0f0;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #0a0;
+        }
+        #results {
+            border: 1px solid #0f0;
+            padding: 10px;
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        canvas {
+            border: 1px solid #333;
+            width: 100%;
+            max-width: 320px;
+            height: auto;
+        }
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .metric {
+            background: #111;
+            padding: 5px;
+            border: 1px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Conference Server Test Suite</h1>
+    
+    <div class="controls">
+        <button onclick="runAllTests()">▶️ Run All Tests</button>
+        <button onclick="testConnection()">🔌 Test Connection</button>
+        <button onclick="testVideo()">📹 Test Video</button>
+        <button onclick="testAudio()">🔊 Test Audio</button>
+        <button onclick="testLatency()">⚡ Test Latency</button>
+        <button onclick="clearResults()">🗑️ Clear</button>
+    </div>
+
+    <div class="test-container">
+        <div class="client-box">
+            <h3>Client A (Sender)</h3>
+            <canvas id="canvasA" width="320" height="180"></canvas>
+            <div class="metrics">
+                <div class="metric">
+                    <small>Frames Sent</small>
+                    <div id="framesSentA">0</div>
+                </div>
+                <div class="metric">
+                    <small>Audio Packets</small>
+                    <div id="audioSentA">0</div>
+                </div>
+                <div class="metric">
+                    <small>Latency</small>
+                    <div id="latencyA">-</div>
+                </div>
+            </div>
+            <div id="statusA" class="status info">Disconnected</div>
+        </div>
+        
+        <div class="client-box">
+            <h3>Client B (Receiver)</h3>
+            <canvas id="canvasB" width="320" height="180"></canvas>
+            <div class="metrics">
+                <div class="metric">
+                    <small>Frames Received</small>
+                    <div id="framesReceivedB">0</div>
+                </div>
+                <div class="metric">
+                    <small>Audio Packets</small>
+                    <div id="audioReceivedB">0</div>
+                </div>
+                <div class="metric">
+                    <small>Latency</small>
+                    <div id="latencyB">-</div>
+                </div>
+            </div>
+            <div id="statusB" class="status info">Disconnected</div>
+        </div>
+    </div>
+
+    <div id="results">
+        <h3>Test Results:</h3>
+    </div>
+
+    <script>
+        const WS_URL = 'wss://91.99.159.21.nip.io/ws';
+        let clientA = null;
+        let clientB = null;
+        let testResults = [];
+        
+        // Metrics
+        let metrics = {
+            A: { framesSent: 0, audioSent: 0, latency: 0 },
+            B: { framesReceived: 0, audioReceived: 0, latency: 0 }
+        };
+
+        function log(message, type = 'info') {
+            const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+            const result = `[${timestamp}] ${message}`;
+            testResults.push({ message: result, type });
+            updateResults();
+        }
+
+        function updateResults() {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '<h3>Test Results:</h3>' + 
+                testResults.map(r => 
+                    `<div class="${r.type}">${r.message}</div>`
+                ).join('');
+            resultsDiv.scrollTop = resultsDiv.scrollHeight;
+        }
+
+        function clearResults() {
+            testResults = [];
+            updateResults();
+        }
+
+        function updateMetrics() {
+            document.getElementById('framesSentA').textContent = metrics.A.framesSent;
+            document.getElementById('audioSentA').textContent = metrics.A.audioSent;
+            document.getElementById('latencyA').textContent = metrics.A.latency + 'ms';
+            document.getElementById('framesReceivedB').textContent = metrics.B.framesReceived;
+            document.getElementById('audioReceivedB').textContent = metrics.B.audioReceived;
+            document.getElementById('latencyB').textContent = metrics.B.latency + 'ms';
+        }
+
+        async function testConnection() {
+            log('Testing WebSocket connection...', 'info');
+            
+            return new Promise((resolve) => {
+                // Test Client A
+                clientA = new WebSocket(WS_URL);
+                
+                clientA.onopen = () => {
+                    log('Client A connected successfully', 'success');
+                    document.getElementById('statusA').textContent = 'Connected';
+                    document.getElementById('statusA').className = 'status success';
+                    
+                    clientA.send(JSON.stringify({
+                        type: 'join',
+                        room: 'test',
+                        userId: 'testA'
+                    }));
+                    
+                    // Test Client B
+                    clientB = new WebSocket(WS_URL);
+                    
+                    clientB.onopen = () => {
+                        log('Client B connected successfully', 'success');
+                        document.getElementById('statusB').textContent = 'Connected';
+                        document.getElementById('statusB').className = 'status success';
+                        
+                        clientB.send(JSON.stringify({
+                            type: 'join',
+                            room: 'test',
+                            userId: 'testB'
+                        }));
+                        
+                        setupMessageHandlers();
+                        resolve(true);
+                    };
+                    
+                    clientB.onerror = (error) => {
+                        log('Client B connection error: ' + error, 'error');
+                        resolve(false);
+                    };
+                };
+                
+                clientA.onerror = (error) => {
+                    log('Client A connection error: ' + error, 'error');
+                    resolve(false);
+                };
+            });
+        }
+
+        function setupMessageHandlers() {
+            clientB.onmessage = (event) => {
+                try {
+                    const message = JSON.parse(event.data);
+                    
+                    switch(message.type) {
+                        case 'frame':
+                        case 'webp-frame':
+                            metrics.B.framesReceived++;
+                            updateMetrics();
+                            displayFrame('canvasB', message.data);
+                            break;
+                        
+                        case 'audio':
+                            metrics.B.audioReceived++;
+                            updateMetrics();
+                            log(`Audio received: ${message.audioData?.length || 0} bytes`, 'info');
+                            break;
+                        
+                        case 'user-joined':
+                            log(`User joined: ${message.id}`, 'info');
+                            break;
+                        
+                        case 'pong':
+                            metrics.B.latency = Date.now() - message.timestamp;
+                            updateMetrics();
+                            break;
+                    }
+                } catch (e) {
+                    console.error('Message parse error:', e);
+                }
+            };
+            
+            clientA.onmessage = (event) => {
+                try {
+                    const message = JSON.parse(event.data);
+                    if (message.type === 'pong') {
+                        metrics.A.latency = Date.now() - message.timestamp;
+                        updateMetrics();
+                    }
+                } catch (e) {
+                    console.error('Message parse error:', e);
+                }
+            };
+        }
+
+        function displayFrame(canvasId, base64Data) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            
+            img.onload = () => {
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            };
+            
+            img.src = 'data:image/jpeg;base64,' + base64Data;
+        }
+
+        async function testVideo() {
+            if (!clientA || clientA.readyState !== WebSocket.OPEN) {
+                log('Please connect first', 'warning');
+                return;
+            }
+            
+            log('Testing video transmission...', 'info');
+            
+            // Generate test pattern
+            const canvas = document.getElementById('canvasA');
+            const ctx = canvas.getContext('2d');
+            
+            // Draw test pattern
+            const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+            gradient.addColorStop(0, '#ff0000');
+            gradient.addColorStop(0.5, '#00ff00');
+            gradient.addColorStop(1, '#0000ff');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Add text
+            ctx.fillStyle = 'white';
+            ctx.font = '20px monospace';
+            ctx.fillText('TEST PATTERN', canvas.width/2 - 60, canvas.height/2);
+            ctx.fillText(new Date().toLocaleTimeString(), canvas.width/2 - 50, canvas.height/2 + 30);
+            
+            // Send frame
+            canvas.toBlob((blob) => {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    const base64 = reader.result.split(',')[1];
+                    clientA.send(JSON.stringify({
+                        type: 'frame',
+                        data: base64,
+                        quality: 'test'
+                    }));
+                    metrics.A.framesSent++;
+                    updateMetrics();
+                    log('Video frame sent', 'success');
+                };
+                reader.readAsDataURL(blob);
+            }, 'image/jpeg', 0.8);
+        }
+
+        async function testAudio() {
+            if (!clientA || clientA.readyState !== WebSocket.OPEN) {
+                log('Please connect first', 'warning');
+                return;
+            }
+            
+            log('Testing audio transmission...', 'info');
+            
+            // Generate test audio (sine wave)
+            const sampleRate = 48000;
+            const duration = 0.1; // 100ms
+            const frequency = 440; // A4 note
+            const samples = sampleRate * duration;
+            
+            const audioData = new Int16Array(samples);
+            for (let i = 0; i < samples; i++) {
+                // Generate sine wave
+                const t = i / sampleRate;
+                const value = Math.sin(2 * Math.PI * frequency * t);
+                audioData[i] = Math.floor(value * 32767);
+            }
+            
+            // Convert to base64
+            const bytes = new Uint8Array(audioData.buffer);
+            let binary = '';
+            for (let i = 0; i < bytes.length; i++) {
+                binary += String.fromCharCode(bytes[i]);
+            }
+            const base64 = btoa(binary);
+            
+            // Send audio
+            clientA.send(JSON.stringify({
+                type: 'audio',
+                audioData: base64,
+                sampleRate: sampleRate
+            }));
+            
+            metrics.A.audioSent++;
+            updateMetrics();
+            log(`Audio sent: ${frequency}Hz sine wave`, 'success');
+        }
+
+        async function testLatency() {
+            if (!clientA || clientA.readyState !== WebSocket.OPEN) {
+                log('Please connect first', 'warning');
+                return;
+            }
+            
+            log('Testing latency...', 'info');
+            
+            const timestamps = [];
+            let count = 0;
+            
+            const interval = setInterval(() => {
+                const timestamp = Date.now();
+                clientA.send(JSON.stringify({
+                    type: 'ping',
+                    timestamp: timestamp
+                }));
+                
+                count++;
+                if (count >= 10) {
+                    clearInterval(interval);
+                    
+                    setTimeout(() => {
+                        const avg = (metrics.A.latency + metrics.B.latency) / 2;
+                        log(`Average latency: ${avg}ms`, 'success');
+                    }, 1000);
+                }
+            }, 100);
+        }
+
+        async function runAllTests() {
+            clearResults();
+            log('Starting comprehensive test suite...', 'info');
+            
+            // Reset metrics
+            metrics = {
+                A: { framesSent: 0, audioSent: 0, latency: 0 },
+                B: { framesReceived: 0, audioReceived: 0, latency: 0 }
+            };
+            updateMetrics();
+            
+            // Run tests sequentially
+            const connected = await testConnection();
+            if (!connected) {
+                log('Connection failed, aborting tests', 'error');
+                return;
+            }
+            
+            await new Promise(r => setTimeout(r, 1000));
+            
+            // Test video multiple times
+            for (let i = 0; i < 5; i++) {
+                await testVideo();
+                await new Promise(r => setTimeout(r, 500));
+            }
+            
+            // Test audio multiple times
+            for (let i = 0; i < 5; i++) {
+                await testAudio();
+                await new Promise(r => setTimeout(r, 200));
+            }
+            
+            // Test latency
+            await testLatency();
+            
+            // Final report
+            setTimeout(() => {
+                log('=== Test Summary ===', 'info');
+                log(`Frames: Sent ${metrics.A.framesSent}, Received ${metrics.B.framesReceived}`, 
+                    metrics.A.framesSent === metrics.B.framesReceived ? 'success' : 'warning');
+                log(`Audio: Sent ${metrics.A.audioSent}, Received ${metrics.B.audioReceived}`, 
+                    metrics.A.audioSent === metrics.B.audioReceived ? 'success' : 'warning');
+                log(`Latency: A=${metrics.A.latency}ms, B=${metrics.B.latency}ms`, 'info');
+                
+                const videoSuccess = metrics.B.framesReceived > 0;
+                const audioSuccess = metrics.B.audioReceived > 0;
+                
+                if (videoSuccess && audioSuccess) {
+                    log('✅ All tests passed!', 'success');
+                } else {
+                    log('❌ Some tests failed', 'error');
+                    if (!videoSuccess) log('Video transmission failed', 'error');
+                    if (!audioSuccess) log('Audio transmission failed', 'error');
+                }
+            }, 2000);
+        }
+
+        // Auto-run tests on load
+        window.onload = () => {
+            log('Test suite ready. Click "Run All Tests" to begin.', 'info');
+        };
+    </script>
+</body>
+</html>
