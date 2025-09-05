@@ -184,7 +184,7 @@ class QuadTreeEncoder {
             f: this.frameCount, // frame number
             ts: Date.now(), // timestamp
             a: null, // audio
-            v: null, // video
+            d: null, // video data for compatibility
             q: 'high' // quality
         };
 
@@ -200,9 +200,7 @@ class QuadTreeEncoder {
         // Check if we need a keyframe
         if (this.frameCount % this.keyFrameInterval === 1 || !this.previousFrame) {
             packet.t = 'key';
-            packet.v = {
-                d: this.canvas.toDataURL('image/jpeg', 0.5).split(',')[1]
-            };
+            packet.d = this.canvas.toDataURL('image/jpeg', 0.5).split(',')[1];
         } else {
             // Build quad-tree for delta encoding
             const tree = new QuadTreeNode(0, 0, this.canvas.width, this.canvas.height);
@@ -215,16 +213,15 @@ class QuadTreeEncoder {
                 if (regions.length > 500) {
                     packet.q = 'low';
                     // Merge small regions
-                    packet.v = { r: this.mergeRegions(regions, 64) };
+                    packet.d = this.mergeRegions(regions, 64);
                 } else if (regions.length > 200) {
                     packet.q = 'medium';
-                    packet.v = { r: this.mergeRegions(regions, 32) };
+                    packet.d = this.mergeRegions(regions, 32);
                 } else {
-                    packet.v = { r: regions };
+                    packet.d = regions;
                 }
                 
-                packet.v.w = this.canvas.width;
-                packet.v.h = this.canvas.height;
+                // Width and height are known from canvas size
             }
         }
         
@@ -343,24 +340,32 @@ class QuadTreeDecoder {
         }
         
         // Handle video
-        if (packet.t === 'key' && packet.v && packet.v.d) {
+        if (packet.t === 'key' && packet.d) {
             // Decode keyframe
             const img = new Image();
             img.onload = () => {
                 this.ctx.drawImage(img, 0, 0, this.canvas.width, this.canvas.height);
             };
-            img.src = 'data:image/jpeg;base64,' + packet.v.d;
-        } else if (packet.t === 'delta' && packet.v && packet.v.r) {
-            // Apply delta regions
-            packet.v.r.forEach(region => {
-                // Unpack color
-                const r = (region.c >> 16) & 0xFF;
-                const g = (region.c >> 8) & 0xFF;
-                const b = region.c & 0xFF;
-                
-                this.ctx.fillStyle = `rgb(${r},${g},${b})`;
-                this.ctx.fillRect(region.x, region.y, region.w, region.h);
-            });
+            img.src = 'data:image/jpeg;base64,' + packet.d;
+        } else if (packet.t === 'delta' && packet.d) {
+            // Apply delta regions  
+            if (Array.isArray(packet.d)) {
+                // Simple array format [x, y, w, h, color]
+                packet.d.forEach(region => {
+                    if (Array.isArray(region)) {
+                        const [x, y, w, h, color] = region;
+                        this.ctx.fillStyle = color;
+                        this.ctx.fillRect(x, y, w, h);
+                    } else {
+                        // Object format {x, y, w, h, c}
+                        const r = (region.c >> 16) & 0xFF;
+                        const g = (region.c >> 8) & 0xFF;
+                        const b = region.c & 0xFF;
+                        this.ctx.fillStyle = `rgb(${r},${g},${b})`;
+                        this.ctx.fillRect(region.x, region.y, region.w, region.h);
+                    }
+                });
+            }
         }
         
         return {
