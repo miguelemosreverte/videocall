@@ -52,7 +52,7 @@ jobs:
     - name: Copy files to server
       uses: appleboy/scp-action@v0.1.5
       with:
-        host: 91.99.159.21
+        host: 95.217.238.72
         username: root
         key: ${{ secrets.HETZNER_SSH_KEY }}
         source: "conference.tar.gz,docker-compose.yml,Caddyfile"
@@ -61,7 +61,7 @@ jobs:
     - name: Deploy to Hetzner
       uses: appleboy/ssh-action@v1.0.0
       with:
-        host: 91.99.159.21
+        host: 95.217.238.72
         username: root
         key: ${{ secrets.HETZNER_SSH_KEY }}
         script: |
@@ -75,7 +75,7 @@ jobs:
     - name: Copy files to server
       uses: appleboy/scp-action@v0.1.5
       with:
-        host: 91.99.159.21
+        host: 95.217.238.72
         username: root
         key: ${{ secrets.HETZNER_SSH_KEY }}
         source: "conference.tar.gz,docker-compose.yml,Caddyfile"
@@ -84,7 +84,7 @@ jobs:
     - name: Deploy on server
       uses: appleboy/ssh-action@v1.0.0
       with:
-        host: 91.99.159.21
+        host: 95.217.238.72
         username: root
         key: ${{ secrets.HETZNER_SSH_KEY }}
         script: |
@@ -112,4 +112,4 @@ jobs:
       run: |
         echo "GitHub Pages will automatically deploy from main branch"
         echo "Visit: https://miguelemosreverte.github.io/videocall/"
-        echo "Server: wss://91.99.159.21.nip.io/ws"
+        echo "Server: wss://95.217.238.72.nip.io/ws"
