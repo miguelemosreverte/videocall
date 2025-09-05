@@ -232,7 +232,7 @@
                             if (message.from === 'testA') {
                                 metrics.B.framesReceived++;
                                 updateMetrics();
-                                displayFrame('canvasB', message.data);
+                                displayFrame('canvasB', message.data, 'Test A');
                                 
                                 // Calculate frame latency if timestamp present
                                 if (message.timestamp) {
@@ -244,10 +244,10 @@
                                 log(`Warning: Received own frame back`, 'warning');
                             } else if (message.from) {
                                 // Frame from another user (like main conference tab)
-                                metrics.B.framesReceived++;
-                                updateMetrics();
-                                displayFrame('canvasB', message.data);
-                                log(`Frame from ${message.from}`, 'info');
+                                // Don't count these in test metrics, just display with label
+                                const shortId = message.from.toString().substring(0, 8);
+                                displayFrame('canvasB', message.data, `User ${shortId}`);
+                                // Silently handle conference frames
                             }
                             break;
                         
@@ -298,9 +298,17 @@
                     switch(message.type) {
                         case 'frame':
                         case 'webp-frame':
-                            // Client A shouldn't receive its own frames back
-                            if (message.from && message.from !== 'testA') {
-                                log(`Warning: Client A received unexpected frame from ${message.from}`, 'warning');
+                            // Client A can receive frames from other clients
+                            if (message.from === 'testA') {
+                                // Our own frame - shouldn't happen
+                                log(`Warning: Client A received own frame back`, 'warning');
+                            } else if (message.from === 'testB') {
+                                // Frame from our test client B
+                                log(`Client A received test frame from B`, 'info');
+                            } else if (message.from) {
+                                // Frame from conference users - this is normal
+                                // Just silently ignore or optionally display
+                                // log(`Conference frame from ${message.from}`, 'info');
                             }
                             break;
                             
@@ -319,13 +327,22 @@
             };
         }
 
-        function displayFrame(canvasId, base64Data) {
+        function displayFrame(canvasId, base64Data, source = '') {
             const canvas = document.getElementById(canvasId);
             const ctx = canvas.getContext('2d');
             const img = new Image();
             
             img.onload = () => {
                 ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                
+                // Add source label if provided
+                if (source) {
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                    ctx.fillRect(0, 0, 150, 25);
+                    ctx.fillStyle = '#0f0';
+                    ctx.font = '12px monospace';
+                    ctx.fillText(`From: ${source}`, 5, 17);
+                }
             };
             
             img.src = 'data:image/jpeg;base64,' + base64Data;
