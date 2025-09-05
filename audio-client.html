@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio-Only WebSocket Client</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        input, button {
+            width: 100%;
+            padding: 12px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        button:hover:not(:disabled) {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        #status {
+            margin: 20px 0;
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .connected {
+            background: #d4edda;
+            color: #155724;
+        }
+        .disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .connecting {
+            background: #fff3cd;
+            color: #856404;
+        }
+        #stats {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 Audio-Only WebSocket Client</h1>
+        
+        <input type="text" id="username" placeholder="Enter your username" />
+        <input type="text" id="server" placeholder="Server URL (e.g., wss://95.217.238.72.nip.io)" value="wss://95.217.238.72.nip.io" />
+        <button id="connectBtn" onclick="connect()">Connect</button>
+        <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+        
+        <div id="status" class="disconnected">Disconnected</div>
+        
+        <div id="stats">
+            <div>Audio Packets Sent: <span id="packetsSent">0</span></div>
+            <div>Audio Packets Received: <span id="packetsReceived">0</span></div>
+            <div>Connected Users: <span id="connectedUsers">0</span></div>
+            <div>Audio Level: <span id="audioLevel">0</span></div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let mediaStream = null;
+        let audioContext = null;
+        let audioProcessor = null;
+        let audioQueue = [];
+        let stats = {
+            packetsSent: 0,
+            packetsReceived: 0,
+            connectedUsers: 0
+        };
+
+        function updateStatus(status, message) {
+            const statusEl = document.getElementById('status');
+            statusEl.className = status;
+            statusEl.textContent = message;
+        }
+
+        function updateStats() {
+            document.getElementById('packetsSent').textContent = stats.packetsSent;
+            document.getElementById('packetsReceived').textContent = stats.packetsReceived;
+            document.getElementById('connectedUsers').textContent = stats.connectedUsers;
+        }
+
+        async function connect() {
+            const username = document.getElementById('username').value.trim();
+            const server = document.getElementById('server').value.trim();
+            
+            if (!username) {
+                alert('Please enter a username');
+                return;
+            }
+            
+            if (!server) {
+                alert('Please enter a server URL');
+                return;
+            }
+            
+            updateStatus('connecting', 'Connecting...');
+            
+            try {
+                // Connect to WebSocket with username in URL
+                const wsUrl = `${server}/ws/${encodeURIComponent(username)}`;
+                ws = new WebSocket(wsUrl);
+                
+                ws.binaryType = 'arraybuffer';
+                
+                ws.onopen = async () => {
+                    updateStatus('connected', `Connected as ${username}`);
+                    document.getElementById('connectBtn').disabled = true;
+                    document.getElementById('disconnectBtn').disabled = false;
+                    document.getElementById('username').disabled = true;
+                    document.getElementById('server').disabled = true;
+                    
+                    // Start audio capture
+                    await startAudioCapture();
+                };
+                
+                ws.onmessage = (event) => {
+                    stats.packetsReceived++;
+                    updateStats();
+                    
+                    // Play received audio
+                    if (event.data instanceof ArrayBuffer) {
+                        playAudio(event.data);
+                    }
+                };
+                
+                ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    updateStatus('disconnected', 'Connection error');
+                };
+                
+                ws.onclose = () => {
+                    updateStatus('disconnected', 'Disconnected');
+                    document.getElementById('connectBtn').disabled = false;
+                    document.getElementById('disconnectBtn').disabled = true;
+                    document.getElementById('username').disabled = false;
+                    document.getElementById('server').disabled = false;
+                    stopAudioCapture();
+                };
+                
+            } catch (error) {
+                console.error('Connection failed:', error);
+                updateStatus('disconnected', 'Failed to connect');
+            }
+        }
+
+        async function startAudioCapture() {
+            try {
+                // Get user media
+                mediaStream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        sampleRate: 48000
+                    } 
+                });
+                
+                // Create audio context
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                    sampleRate: 48000
+                });
+                
+                const source = audioContext.createMediaStreamSource(mediaStream);
+                audioProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+                
+                audioProcessor.onaudioprocess = (e) => {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        const inputData = e.inputBuffer.getChannelData(0);
+                        
+                        // Calculate audio level
+                        let sum = 0;
+                        for (let i = 0; i < inputData.length; i++) {
+                            sum += Math.abs(inputData[i]);
+                        }
+                        const level = Math.round((sum / inputData.length) * 100);
+                        document.getElementById('audioLevel').textContent = level;
+                        
+                        // Convert to 16-bit PCM
+                        const pcmData = new Int16Array(inputData.length);
+                        for (let i = 0; i < inputData.length; i++) {
+                            pcmData[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+                        }
+                        
+                        // Send as binary
+                        ws.send(pcmData.buffer);
+                        stats.packetsSent++;
+                        updateStats();
+                    }
+                };
+                
+                source.connect(audioProcessor);
+                audioProcessor.connect(audioContext.destination);
+                
+            } catch (error) {
+                console.error('Failed to start audio capture:', error);
+                alert('Failed to access microphone');
+            }
+        }
+
+        function stopAudioCapture() {
+            if (audioProcessor) {
+                audioProcessor.disconnect();
+                audioProcessor = null;
+            }
+            
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+            }
+            
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+        }
+
+        function playAudio(arrayBuffer) {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                    sampleRate: 48000
+                });
+            }
+            
+            // Convert ArrayBuffer to Float32Array
+            const pcmData = new Int16Array(arrayBuffer);
+            const floatData = new Float32Array(pcmData.length);
+            
+            for (let i = 0; i < pcmData.length; i++) {
+                floatData[i] = pcmData[i] / 32768;
+            }
+            
+            // Create audio buffer
+            const buffer = audioContext.createBuffer(1, floatData.length, 48000);
+            buffer.getChannelData(0).set(floatData);
+            
+            // Play the buffer
+            const source = audioContext.createBufferSource();
+            source.buffer = buffer;
+            source.connect(audioContext.destination);
+            source.start();
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+
+        // Poll for connected users count
+        setInterval(async () => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const server = document.getElementById('server').value.replace('wss://', 'https://').replace('ws://', 'http://');
+                try {
+                    const response = await fetch(`${server}/health`);
+                    const data = await response.json();
+                    stats.connectedUsers = data.count || 0;
+                    updateStats();
+                } catch (error) {
+                    // Ignore errors
+                }
+            }
+        }, 5000);
+    </script>
+</body>
+</html>

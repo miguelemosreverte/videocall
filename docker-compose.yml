@@ -1,61 +1,37 @@
 version: '3.8'
 
 services:
-  conference-server:
-    build: .
-    image: webp-conference:latest
-    container_name: webp-conference
-    ports:
-      - "3001:3001"  # Internal WebSocket server
-    command: ["./conference-webp"]  # Run echo-free server directly
-    environment:
-      # Server configuration
-      - DOMAIN=${DOMAIN:-localhost}
-      - USE_SSL=${USE_SSL:-false}
-      - CERT_EMAIL=${CERT_EMAIL:-admin@example.com}
-      
-      # Performance tuning
-      - MAX_USERS_PER_ROOM=${MAX_USERS_PER_ROOM:-10}
-      - VIDEO_QUALITY=${VIDEO_QUALITY:-auto}
-      - AUDIO_BITRATE=${AUDIO_BITRATE:-32000}
-      
-      # Bandwidth settings (in kbps)
-      - BANDWIDTH_LIMIT=${BANDWIDTH_LIMIT:-0}  # 0 = unlimited
-      - PER_USER_BANDWIDTH=${PER_USER_BANDWIDTH:-1000}
-      
-    volumes:
-      # Persist SSL certificates
-      - ./certs:/app/certs
-      - ./logs:/app/logs
-      
+  relay:
+    build:
+      context: .
+      dockerfile: Dockerfile.relay
+    container_name: websocket-relay
     restart: unless-stopped
-    
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3001/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
+    ports:
+      - "8080:8080"
+    networks:
+      - relay-network
 
-  # Caddy reverse proxy for SSL
   caddy:
     image: caddy:2-alpine
     container_name: caddy-proxy
+    restart: unless-stopped
     ports:
-      - "80:80"      # HTTP
-      - "443:443"    # HTTPS
+      - "80:80"
+      - "443:443"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./Caddyfile.docker:/etc/caddy/Caddyfile
       - caddy_data:/data
       - caddy_config:/config
+    networks:
+      - relay-network
     depends_on:
-      - conference-server
-    restart: unless-stopped
+      - relay
 
 volumes:
   caddy_data:
   caddy_config:
 
 networks:
-  default:
-    name: conference-network
+  relay-network:
+    driver: bridge

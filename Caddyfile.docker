@@ -1,0 +1,14 @@
+95.217.238.72.nip.io {
+    @websocket {
+        header Connection *Upgrade*
+        header Upgrade websocket
+    }
+    
+    handle @websocket {
+        reverse_proxy relay:8080
+    }
+    
+    handle {
+        respond "WebSocket Relay Server" 200
+    }
+}
