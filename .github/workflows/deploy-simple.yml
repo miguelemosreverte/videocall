@@ -1,0 +1,80 @@
+name: Deploy Quad-Tree Server
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+    
+    - name: Build for ARM64
+      run: |
+        GOOS=linux GOARCH=arm64 go build -o conference-server-arm64 conference-quadtree.go quadtree-server.go
+        ls -lh conference-server-arm64
+    
+    - name: Deploy to Server
+      uses: appleboy/scp-action@v0.1.5
+      with:
+        host: 95.217.238.72
+        username: root
+        key: ${{ secrets.HETZNER_SSH_KEY }}
+        source: "conference-server-arm64,quadtree-client.js,index.html"
+        target: "/root/videocall"
+        strip_components: 0
+    
+    - name: Setup Caddy and Start Server
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: 95.217.238.72
+        username: root
+        key: ${{ secrets.HETZNER_SSH_KEY }}
+        script: |
+          cd /root/videocall
+          
+          # Kill old server
+          pkill -f conference-server || true
+          pkill -f conference-quadtree || true
+          
+          # Make executable
+          chmod +x conference-server-arm64
+          
+          # Create Caddyfile for SSL
+          cat > /etc/caddy/Caddyfile << 'EOF'
+          95.217.238.72.nip.io {
+              tls internal
+              
+              handle /ws {
+                  reverse_proxy localhost:3001
+              }
+              
+              handle /health {
+                  reverse_proxy localhost:3001
+              }
+              
+              handle {
+                  respond "Quad-Tree Conference Server"
+              }
+          }
+          EOF
+          
+          # Start server
+          nohup ./conference-server-arm64 > server.log 2>&1 &
+          
+          # Restart Caddy for SSL
+          systemctl restart caddy
+          
+          # Check status
+          sleep 2
+          ps aux | grep conference
+          systemctl status caddy --no-pager
+          curl -k https://localhost/health || echo "Server starting..."
