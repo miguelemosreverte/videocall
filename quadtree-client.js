@@ -322,6 +322,7 @@ class QuadTreeDecoder {
             requestAnimationFrame(processAudio);
         };
         
+        // Actually start the loop!
         processAudio();
     }
 
@@ -341,28 +342,38 @@ class QuadTreeDecoder {
         
         // Handle video
         if (packet.t === 'key' && packet.d) {
-            // Decode keyframe
+            // Decode keyframe - draw immediately to persist
             const img = new Image();
-            img.onload = () => {
-                this.ctx.drawImage(img, 0, 0, this.canvas.width, this.canvas.height);
-            };
             img.src = 'data:image/jpeg;base64,' + packet.d;
+            // Draw synchronously once loaded
+            img.onload = () => {
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                this.ctx.drawImage(img, 0, 0, this.canvas.width, this.canvas.height);
+                // Store the keyframe for persistence
+                this.lastKeyFrame = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
+            };
         } else if (packet.t === 'delta' && packet.d) {
-            // Apply delta regions  
+            // Only apply deltas if we have a keyframe
+            if (!this.lastKeyFrame) return;
+            
+            // Restore last keyframe first
+            this.ctx.putImageData(this.lastKeyFrame, 0, 0);
+            
+            // Apply delta regions on top
             if (Array.isArray(packet.d)) {
-                // Simple array format [x, y, w, h, color]
                 packet.d.forEach(region => {
-                    if (Array.isArray(region)) {
-                        const [x, y, w, h, color] = region;
-                        this.ctx.fillStyle = color;
-                        this.ctx.fillRect(x, y, w, h);
-                    } else {
+                    if (region.x !== undefined) {
                         // Object format {x, y, w, h, c}
                         const r = (region.c >> 16) & 0xFF;
                         const g = (region.c >> 8) & 0xFF;
                         const b = region.c & 0xFF;
                         this.ctx.fillStyle = `rgb(${r},${g},${b})`;
                         this.ctx.fillRect(region.x, region.y, region.w, region.h);
+                    } else if (Array.isArray(region)) {
+                        // Array format [x, y, w, h, color]
+                        const [x, y, w, h, color] = region;
+                        this.ctx.fillStyle = color;
+                        this.ctx.fillRect(x, y, w, h);
                     }
                 });
             }

@@ -343,15 +343,14 @@
         
         // Start streaming with quad-tree codec
         async function startStreaming() {
-            // Request high-quality stream for 4K
+            // Request high-quality stream - Safari compatible
             const constraints = {
                 video: {
-                    width: { ideal: 3840, min: 1920 },
-                    height: { ideal: 2160, min: 1080 },
-                    frameRate: { ideal: 60, min: 30 }
+                    width: { ideal: 3840 },
+                    height: { ideal: 2160 },
+                    frameRate: { ideal: 60 }
                 },
                 audio: {
-                    sampleRate: 48000,
                     echoCancellation: true,
                     noiseSuppression: true,
                     autoGainControl: true
