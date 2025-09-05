@@ -171,6 +171,19 @@
         async function testConnection() {
             log('Testing WebSocket connection...', 'info');
             
+            // Close existing connections if any
+            if (clientA) {
+                clientA.close();
+                clientA = null;
+            }
+            if (clientB) {
+                clientB.close();
+                clientB = null;
+            }
+            
+            // Wait a bit for cleanup
+            await new Promise(r => setTimeout(r, 100));
+            
             return new Promise((resolve) => {
                 // Test Client A
                 clientA = new WebSocket(WS_URL);
@@ -231,6 +244,9 @@
         function setupMessageHandlers() {
             // Store ping timestamps
             const pingTimestamps = new Map();
+            // Track processed messages to avoid double counting
+            const processedAudio = new Set();
+            const processedFrames = new Set();
             
             // Keep connections alive with periodic pings
             setInterval(() => {
@@ -306,13 +322,28 @@
                             break;
                         
                         case 'audio':
-                            metrics.B.audioReceived++;
-                            updateMetrics();
-                            log(`Audio received: ${message.audioData?.length || 0} bytes`, 'info');
+                            // Only count audio from client A (not from ourselves or others)
+                            if (message.from) {
+                                const fromStr = message.from.toString();
+                                // Create a unique key for this audio packet
+                                const audioKey = `${fromStr}-${message.audioData?.length || 0}-${message.sampleRate || 0}`;
+                                
+                                // Only count if we haven't seen this exact packet before
+                                if (!processedAudio.has(audioKey)) {
+                                    processedAudio.add(audioKey);
+                                    metrics.B.audioReceived++;
+                                    updateMetrics();
+                                    log(`Audio received from ${fromStr.substring(0, 8)}: ${message.audioData?.length || 0} bytes`, 'info');
+                                }
+                            }
                             break;
                         
                         case 'user-joined':
                             log(`User joined: ${message.id}`, 'info');
+                            // Track our actual client IDs
+                            if (!clientBId && message.id) {
+                                clientBId = message.id;
+                            }
                             break;
                         
                         case 'ping':
@@ -410,6 +441,8 @@
         let frameCount = 0;
         let lastFrameTime = Date.now();
         let currentFPS = 0;
+        let clientAId = null; // Track actual ID assigned by server
+        let clientBId = null;
         
         async function testVideo() {
             if (!clientA || clientA.readyState !== WebSocket.OPEN) {
