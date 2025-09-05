@@ -77,6 +77,7 @@
         <button onclick="testVideo()">📹 Test Video</button>
         <button onclick="testAudio()">🔊 Test Audio</button>
         <button onclick="testLatency()">⚡ Test Latency</button>
+        <button onclick="disconnect()">🔴 Disconnect</button>
         <button onclick="clearResults()">🗑️ Clear</button>
     </div>
 
@@ -158,6 +159,41 @@
             testResults = [];
             updateResults();
         }
+        
+        function disconnect() {
+            log('Disconnecting all clients...', 'info');
+            
+            // Clear any running video interval
+            if (videoInterval) {
+                clearInterval(videoInterval);
+                videoInterval = null;
+            }
+            
+            // Close connections
+            if (clientA) {
+                clientA.close();
+                clientA = null;
+            }
+            if (clientB) {
+                clientB.close();
+                clientB = null;
+            }
+            
+            // Update UI
+            document.getElementById('statusA').textContent = 'Disconnected';
+            document.getElementById('statusA').className = 'status';
+            document.getElementById('statusB').textContent = 'Disconnected';
+            document.getElementById('statusB').className = 'status';
+            
+            // Reset metrics
+            metrics = {
+                A: { framesSent: 0, audioSent: 0, pings: 0 },
+                B: { framesReceived: 0, audioReceived: 0, latencies: [] }
+            };
+            updateMetrics();
+            
+            log('All clients disconnected', 'success');
+        }
 
         function updateMetrics() {
             document.getElementById('framesSentA').textContent = metrics.A.framesSent;
@@ -171,35 +207,73 @@
         async function testConnection() {
             log('Testing WebSocket connection...', 'info');
             
-            // Close existing connections if any
-            if (clientA) {
+            // Check if already connected
+            if (clientA && clientA.readyState === WebSocket.OPEN && 
+                clientB && clientB.readyState === WebSocket.OPEN) {
+                log('Already connected, skipping reconnection', 'info');
+                return Promise.resolve(true);
+            }
+            
+            // Close existing connections only if they're not properly connected
+            if (clientA && clientA.readyState !== WebSocket.OPEN) {
                 clientA.close();
                 clientA = null;
+                await new Promise(r => setTimeout(r, 100));
             }
-            if (clientB) {
+            if (clientB && clientB.readyState !== WebSocket.OPEN) {
                 clientB.close();
                 clientB = null;
+                await new Promise(r => setTimeout(r, 100));
             }
             
-            // Wait a bit for cleanup
-            await new Promise(r => setTimeout(r, 100));
-            
             return new Promise((resolve) => {
-                // Test Client A
-                clientA = new WebSocket(WS_URL);
+                let connectionsNeeded = 0;
+                let connectionsReady = 0;
                 
-                clientA.onopen = () => {
-                    log('Client A connected successfully', 'success');
-                    document.getElementById('statusA').textContent = 'Connected';
-                    document.getElementById('statusA').className = 'status success';
+                function checkAllConnected() {
+                    if (connectionsReady === connectionsNeeded) {
+                        setupMessageHandlers();
+                        resolve(true);
+                    }
+                }
+                
+                // Test Client A - only create if not already exists
+                if (!clientA) {
+                    connectionsNeeded++;
+                    clientA = new WebSocket(WS_URL);
                     
-                    clientA.send(JSON.stringify({
-                        type: 'join',
-                        room: 'test',
-                        userId: 'testA'
-                    }));
+                    clientA.onopen = () => {
+                        log('Client A connected successfully', 'success');
+                        document.getElementById('statusA').textContent = 'Connected';
+                        document.getElementById('statusA').className = 'status success';
+                        
+                        clientA.send(JSON.stringify({
+                            type: 'join',
+                            room: 'test',
+                            userId: 'testA'
+                        }));
+                        
+                        connectionsReady++;
+                        checkAllConnected();
+                    };
                     
-                    // Test Client B
+                    clientA.onerror = (error) => {
+                        log('Client A connection error: ' + error, 'error');
+                        clientA = null;
+                        resolve(false);
+                    };
+                    
+                    clientA.onclose = () => {
+                        log('Client A connection closed', 'warning');
+                        document.getElementById('statusA').textContent = 'Disconnected';
+                        document.getElementById('statusA').className = 'status error';
+                        clientA = null;
+                    };
+                }
+                
+                // Test Client B - only create if not already exists
+                if (!clientB) {
+                    connectionsNeeded++;
                     clientB = new WebSocket(WS_URL);
                     
                     clientB.onopen = () => {
@@ -213,31 +287,28 @@
                             userId: 'testB'
                         }));
                         
-                        setupMessageHandlers();
-                        resolve(true);
+                        connectionsReady++;
+                        checkAllConnected();
                     };
                     
                     clientB.onerror = (error) => {
                         log('Client B connection error: ' + error, 'error');
+                        clientB = null;
                         resolve(false);
                     };
-                };
+                    
+                    clientB.onclose = () => {
+                        log('Client B connection closed', 'warning');
+                        document.getElementById('statusB').textContent = 'Disconnected';
+                        document.getElementById('statusB').className = 'status error';
+                        clientB = null;
+                    };
+                }
                 
-                clientA.onerror = (error) => {
-                    log('Client A connection error: ' + error, 'error');
-                    clientA = null;
-                    resolve(false);
-                };
-                
-                clientA.onclose = () => {
-                    log('Client A connection closed', 'warning');
-                    clientA = null;
-                };
-                
-                clientB.onclose = () => {
-                    log('Client B connection closed', 'warning');
-                    clientB = null;
-                };
+                // If both connections already exist, resolve immediately
+                if (connectionsNeeded === 0) {
+                    resolve(true);
+                }
             });
         }
 
