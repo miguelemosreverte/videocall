@@ -283,11 +283,17 @@
                                     updateMetrics();
                                     displayFrame('canvasB', message.data, `Test Client`);
                                     
-                                    if (message.timestamp) {
-                                        const frameLatency = Date.now() - parseInt(message.timestamp);
-                                        // Only log first few to avoid spam
-                                        if (metrics.B.framesReceived <= 5) {
-                                            log(`Test frame received, latency: ${frameLatency}ms`, 'info');
+                                    // Check for our custom sentAt field
+                                    if (message.sentAt) {
+                                        const sentTime = typeof message.sentAt === 'string' ? parseInt(message.sentAt) : message.sentAt;
+                                        const frameLatency = Date.now() - sentTime;
+                                        
+                                        // Only show reasonable latencies (< 10 seconds)
+                                        if (frameLatency > 0 && frameLatency < 10000) {
+                                            // Only log first few to avoid spam
+                                            if (metrics.B.framesReceived <= 5) {
+                                                log(`Test frame received, latency: ${frameLatency}ms`, 'info');
+                                            }
                                         }
                                     }
                                 } else {
@@ -363,9 +369,13 @@
                         case 'pong':
                             // Simple round-trip time calculation
                             if (message.originalTimestamp) {
-                                const rtt = Date.now() - message.originalTimestamp;
-                                metrics.A.latency = Math.round(rtt / 2); // One-way latency estimate
-                                updateMetrics();
+                                const origTime = typeof message.originalTimestamp === 'string' ? 
+                                    parseInt(message.originalTimestamp) : message.originalTimestamp;
+                                const rtt = Date.now() - origTime;
+                                if (rtt > 0 && rtt < 10000) { // Sanity check
+                                    metrics.A.latency = Math.round(rtt / 2); // One-way latency estimate
+                                    updateMetrics();
+                                }
                             }
                             break;
                     }
@@ -458,12 +468,13 @@
                     const reader = new FileReader();
                     reader.onloadend = () => {
                         const base64 = reader.result.split(',')[1];
-                        clientA.send(JSON.stringify({
+                        const frameData = {
                             type: 'frame',
                             data: base64,
                             quality: 'test',
-                            timestamp: now.toString()
-                        }));
+                            sentAt: now  // Use different field name to avoid confusion
+                        };
+                        clientA.send(JSON.stringify(frameData));
                         metrics.A.framesSent++;
                         updateMetrics();
                     };
