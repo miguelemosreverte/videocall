@@ -228,14 +228,26 @@
                     switch(message.type) {
                         case 'frame':
                         case 'webp-frame':
-                            // Only count frames from the other client
+                            // Handle frames from any source
                             if (message.from === 'testA') {
                                 metrics.B.framesReceived++;
                                 updateMetrics();
                                 displayFrame('canvasB', message.data);
+                                
+                                // Calculate frame latency if timestamp present
+                                if (message.timestamp) {
+                                    const frameLatency = Date.now() - message.timestamp;
+                                    log(`Frame latency: ${frameLatency}ms`, 'info');
+                                }
                             } else if (message.from === 'testB') {
                                 // This is our own frame being echoed back - don't count
                                 log(`Warning: Received own frame back`, 'warning');
+                            } else if (message.from) {
+                                // Frame from another user (like main conference tab)
+                                metrics.B.framesReceived++;
+                                updateMetrics();
+                                displayFrame('canvasB', message.data);
+                                log(`Frame from ${message.from}`, 'info');
                             }
                             break;
                         
@@ -319,48 +331,89 @@
             img.src = 'data:image/jpeg;base64,' + base64Data;
         }
 
+        let videoInterval = null;
+        let frameCount = 0;
+        let lastFrameTime = Date.now();
+        let currentFPS = 0;
+        
         async function testVideo() {
             if (!clientA || clientA.readyState !== WebSocket.OPEN) {
                 log('Please connect first', 'warning');
                 return;
             }
             
-            log('Testing video transmission...', 'info');
+            log('Starting continuous video transmission...', 'info');
             
-            // Generate test pattern
-            const canvas = document.getElementById('canvasA');
-            const ctx = canvas.getContext('2d');
+            // Clear any existing interval
+            if (videoInterval) {
+                clearInterval(videoInterval);
+            }
             
-            // Draw test pattern
-            const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-            gradient.addColorStop(0, '#ff0000');
-            gradient.addColorStop(0.5, '#00ff00');
-            gradient.addColorStop(1, '#0000ff');
-            ctx.fillStyle = gradient;
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            // Send frames continuously
+            videoInterval = setInterval(() => {
+                const canvas = document.getElementById('canvasA');
+                const ctx = canvas.getContext('2d');
+                
+                // Calculate FPS
+                const now = Date.now();
+                if (now - lastFrameTime > 1000) {
+                    currentFPS = frameCount;
+                    frameCount = 0;
+                    lastFrameTime = now;
+                }
+                frameCount++;
+                
+                // Draw animated gradient background
+                const offset = (now / 10) % 360;
+                const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+                gradient.addColorStop(0, `hsl(${offset}, 100%, 50%)`);
+                gradient.addColorStop(0.5, `hsl(${offset + 120}, 100%, 50%)`);
+                gradient.addColorStop(1, `hsl(${offset + 240}, 100%, 50%)`);
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Add semi-transparent overlay for text
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                ctx.fillRect(0, canvas.height/2 - 40, canvas.width, 80);
+                
+                // Add timestamp with milliseconds
+                ctx.fillStyle = 'white';
+                ctx.font = 'bold 16px monospace';
+                ctx.textAlign = 'center';
+                
+                const timestamp = new Date();
+                const timeStr = timestamp.toLocaleTimeString() + '.' + timestamp.getMilliseconds().toString().padStart(3, '0');
+                
+                ctx.fillText('TEST FRAME', canvas.width/2, canvas.height/2 - 20);
+                ctx.fillText(timeStr, canvas.width/2, canvas.height/2);
+                ctx.fillText(`FPS: ${currentFPS} | Frame: ${metrics.A.framesSent}`, canvas.width/2, canvas.height/2 + 20);
+                
+                // Send frame
+                canvas.toBlob((blob) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        const base64 = reader.result.split(',')[1];
+                        clientA.send(JSON.stringify({
+                            type: 'frame',
+                            data: base64,
+                            quality: 'test',
+                            timestamp: now
+                        }));
+                        metrics.A.framesSent++;
+                        updateMetrics();
+                    };
+                    reader.readAsDataURL(blob);
+                }, 'image/jpeg', 0.8);
+            }, 100); // 10 FPS
             
-            // Add text
-            ctx.fillStyle = 'white';
-            ctx.font = '20px monospace';
-            ctx.fillText('TEST PATTERN', canvas.width/2 - 60, canvas.height/2);
-            ctx.fillText(new Date().toLocaleTimeString(), canvas.width/2 - 50, canvas.height/2 + 30);
-            
-            // Send frame
-            canvas.toBlob((blob) => {
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                    const base64 = reader.result.split(',')[1];
-                    clientA.send(JSON.stringify({
-                        type: 'frame',
-                        data: base64,
-                        quality: 'test'
-                    }));
-                    metrics.A.framesSent++;
-                    updateMetrics();
-                    log('Video frame sent', 'success');
-                };
-                reader.readAsDataURL(blob);
-            }, 'image/jpeg', 0.8);
+            // Stop after 5 seconds if running individual test
+            setTimeout(() => {
+                if (videoInterval) {
+                    clearInterval(videoInterval);
+                    videoInterval = null;
+                    log(`Video test complete. Sent ${metrics.A.framesSent} frames`, 'success');
+                }
+            }, 5000);
         }
 
         async function testAudio() {
@@ -481,11 +534,9 @@
             
             await new Promise(r => setTimeout(r, 1000));
             
-            // Test video multiple times
-            for (let i = 0; i < 5; i++) {
-                await testVideo();
-                await new Promise(r => setTimeout(r, 500));
-            }
+            // Start continuous video (will run for 5 seconds)
+            await testVideo();
+            await new Promise(r => setTimeout(r, 5500));
             
             // Test audio multiple times
             for (let i = 0; i < 5; i++) {
