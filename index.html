@@ -930,25 +930,39 @@
                 const ctx = canvas.getContext('2d');
                 const img = new Image();
                 img.onload = () => {
-                    // Resize canvas to match image aspect ratio if needed
-                    const imgAspect = img.width / img.height;
-                    const containerAspect = 16 / 9; // Target aspect ratio
+                    // Use fixed dimensions that match our container aspect ratio
+                    const targetWidth = 854;
+                    const targetHeight = 480;
                     
-                    // Adjust canvas size to match image aspect
-                    if (Math.abs(imgAspect - containerAspect) > 0.1) {
-                        if (imgAspect > containerAspect) {
-                            // Wider image
-                            canvas.width = 854;
-                            canvas.height = Math.round(854 / imgAspect);
-                        } else {
-                            // Taller image
-                            canvas.height = 480;
-                            canvas.width = Math.round(480 * imgAspect);
-                        }
+                    // Set canvas size if not already set
+                    if (canvas.width !== targetWidth) {
+                        canvas.width = targetWidth;
+                        canvas.height = targetHeight;
                     }
                     
-                    // Draw image to fill entire canvas
-                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    // Calculate how to fit image in canvas
+                    const imgAspect = img.width / img.height;
+                    const canvasAspect = targetWidth / targetHeight;
+                    
+                    let drawWidth, drawHeight, offsetX = 0, offsetY = 0;
+                    
+                    // Use "cover" strategy - fill entire canvas, crop if needed
+                    if (imgAspect > canvasAspect) {
+                        // Image is wider - fit to height, crop width
+                        drawHeight = targetHeight;
+                        drawWidth = targetHeight * imgAspect;
+                        offsetX = (targetWidth - drawWidth) / 2;
+                    } else {
+                        // Image is taller - fit to width, crop height
+                        drawWidth = targetWidth;
+                        drawHeight = targetWidth / imgAspect;
+                        offsetY = (targetHeight - drawHeight) / 2;
+                    }
+                    
+                    // Clear canvas and draw
+                    ctx.fillStyle = '#000';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
                 };
                 img.src = 'data:image/webp;base64,' + message.data;
             }
@@ -964,12 +978,14 @@
             
             const canvas = document.createElement('canvas');
             canvas.id = `canvas-${userId}`;
-            // Use 16:9 aspect ratio by default, will adjust dynamically
+            // Fixed 16:9 canvas size
             canvas.width = 854;
             canvas.height = 480;
+            // CSS to fill container
             canvas.style.width = '100%';
             canvas.style.height = '100%';
             canvas.style.display = 'block';
+            canvas.style.objectFit = 'cover';
             
             const qualityIndicator = document.createElement('div');
             qualityIndicator.className = 'quality-indicator';

@@ -241,8 +241,10 @@
                             break;
                         
                         case 'pong':
-                            metrics.B.latency = Date.now() - message.timestamp;
+                            const latency = Date.now() - parseInt(message.timestamp);
+                            metrics.B.latency = latency;
                             updateMetrics();
+                            log(`Latency measured: ${latency}ms`, 'info');
                             break;
                     }
                 } catch (e) {
