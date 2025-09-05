@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manual Benchmark Test</title>
+    <style>
+        body {
+            font-family: monospace;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #0f0;
+        }
+        iframe {
+            width: 100%;
+            height: 800px;
+            border: 2px solid #0f0;
+            border-radius: 5px;
+        }
+        button {
+            background: #0f0;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            margin: 10px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        #results {
+            background: #000;
+            padding: 10px;
+            border: 1px solid #0f0;
+            margin-top: 20px;
+            white-space: pre-wrap;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <h1>🚀 Manual Benchmark Runner</h1>
+    
+    <button onclick="runTest('hd', 30)">HD @ 30fps</button>
+    <button onclick="runTest('hd', 60)">HD @ 60fps</button>
+    <button onclick="runTest('fhd', 30)">FHD @ 30fps</button>
+    <button onclick="runTest('fhd', 60)">FHD @ 60fps</button>
+    <button onclick="runTest('4k', 30)">4K @ 30fps</button>
+    <button onclick="runTest('4k', 60)">4K @ 60fps</button>
+    
+    <iframe id="benchmark-frame" src="benchmark.html"></iframe>
+    
+    <div id="results">Results will appear here...</div>
+    
+    <script>
+        const results = [];
+        
+        async function runTest(resolution, framerate) {
+            const frame = document.getElementById('benchmark-frame');
+            const frameWindow = frame.contentWindow;
+            
+            // Set configuration
+            frameWindow.document.getElementById('resolution').value = resolution;
+            frameWindow.document.getElementById('framerate').value = framerate;
+            frameWindow.document.getElementById('duration').value = 5;
+            
+            // Clear results
+            document.getElementById('results').textContent = `Running ${resolution.toUpperCase()} @ ${framerate}fps...\n`;
+            
+            // Start benchmark
+            frameWindow.startBenchmark();
+            
+            // Wait for completion
+            setTimeout(() => {
+                const data = frameWindow.benchmarkData;
+                if (data && data.results) {
+                    results.push(data);
+                    displayResults();
+                    
+                    // Save to localStorage
+                    localStorage.setItem(`benchmark-${Date.now()}`, JSON.stringify(data));
+                }
+            }, 7000);
+        }
+        
+        function displayResults() {
+            let output = "=== BENCHMARK RESULTS ===\n\n";
+            
+            for (const result of results) {
+                const config = `${result.config.resolution.toUpperCase()} @ ${result.config.framerate}fps`;
+                output += `${config}:\n`;
+                output += `  Score: ${result.results.score}/100\n`;
+                output += `  FPS: ${result.results.avgFps}\n`;
+                output += `  Latency: ${result.results.avgLatency}ms\n`;
+                output += `  Bitrate: ${result.results.avgBitrate} Mbps\n`;
+                output += `  Jitter: ${result.results.jitter}ms\n`;
+                output += `  Packet Loss: ${result.results.packetLoss}%\n\n`;
+            }
+            
+            document.getElementById('results').textContent = output;
+        }
+    </script>
+</body>
+</html>
